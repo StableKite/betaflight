@@ -898,6 +898,20 @@ extern struct linker_symbol __fontdata_end;
 #define ENABLE_DRONECAN ENABLE_CAN
 #endif
 
+// DroneCAN ESC: command ESCs over CAN (uavcan.equipment.esc.RawCommand) and
+// ingest their telemetry (uavcan.equipment.esc.Status). Built in wherever the
+// DroneCAN stack is, gated at runtime by selecting the DRONECAN motor protocol.
+#if !defined(ENABLE_DRONECAN_ESC)
+#define ENABLE_DRONECAN_ESC ENABLE_DRONECAN
+#endif
+
+// DroneCAN dynamic node-ID allocation: the FC acts as the centralised allocator,
+// handing node IDs to unconfigured peers (e.g. ESCs). Runtime PG flag
+// (dronecan_dna_enabled) decides whether the allocator actually runs.
+#if !defined(ENABLE_DRONECAN_DNA)
+#define ENABLE_DRONECAN_DNA ENABLE_DRONECAN
+#endif
+
 // LCD console — runtime debug terminal that scrolls printf/trace output to
 // an attached LCD. Independent of the OSD/displayPort stack. Off by default;
 // configs opt in by setting ENABLE_LCD_CONSOLE 1 plus a panel selector
