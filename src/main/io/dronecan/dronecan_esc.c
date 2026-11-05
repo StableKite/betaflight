@@ -52,7 +52,7 @@
 
 #include "io/dronecan/dronecan.h"
 #include "io/dronecan/dronecan_esc.h"
-#include "io/dronecan/dronecan_msg.h"
+#include "io/dronecan/dronecan_esc_protocol.h"
 
 //-----------------------------------------------------------------------------
 // Command out: esc.RawCommand
@@ -86,39 +86,6 @@ void dronecanEscWrite(uint8_t motorIndex, float value)
     escStaging[motorIndex] = (int16_t)constrainf(value, 0, UAVCAN_ESC_RAWCOMMAND_MAX);
 }
 
-static void broadcastRawCommand(void)
-{
-    const uint8_t motorCount = getMotorCount();
-    if (motorCount == 0) {
-        return;
-    }
-
-    // Pack motorCount int14 values, MSB-first per field. TAO: no length prefix.
-    // 8 motors * 14 bits = 112 bits = 14 bytes worst case.
-    uint8_t payload[(MAX_SUPPORTED_MOTORS * UAVCAN_ESC_RAWCOMMAND_BITS + 7U) / 8U];
-    memset(payload, 0, sizeof(payload));
-
-    uint32_t bitOffset = 0;
-    for (uint8_t i = 0; i < motorCount; i++) {
-        const int16_t v = constrain(escStaging[i], 0, UAVCAN_ESC_RAWCOMMAND_MAX);
-        canardEncodeScalar(payload, bitOffset, UAVCAN_ESC_RAWCOMMAND_BITS, &v);
-        bitOffset += UAVCAN_ESC_RAWCOMMAND_BITS;
-    }
-    const uint16_t payloadLen = (uint16_t)((bitOffset + 7U) / 8U);
-
-    CanardTxTransfer tx;
-    canardInitTxTransfer(&tx);
-    tx.transfer_type       = CanardTransferTypeBroadcast;
-    tx.data_type_signature = UAVCAN_ESC_RAWCOMMAND_SIGNATURE;
-    tx.data_type_id        = UAVCAN_ESC_RAWCOMMAND_ID;
-    tx.inout_transfer_id   = &escRawCommandTransferId;
-    tx.priority            = CANARD_TRANSFER_PRIORITY_HIGH;
-    tx.payload             = payload;
-    tx.payload_len         = payloadLen;
-
-    canardBroadcastObj(dronecanGetInstance(), &tx);
-}
-
 // Encode the current throttles into a RawCommand transfer and push it to the
 // driver immediately. Ungated — callers handle rate limiting / forcing.
 static void emitRawCommand(void)
@@ -126,7 +93,7 @@ static void emitRawCommand(void)
     if (!dronecanIsInitialised()) {
         return;
     }
-    broadcastRawCommand();
+    dronecanEscBroadcastRaw(dronecanGetInstance(), escStaging, getMotorCount(), &escRawCommandTransferId);
     // Flush straight to the driver so the frame rides out on this PID iteration
     // if the bus is free; the driver's SW ring + TC interrupt absorb the rest.
     dronecanFlushTx();
@@ -169,48 +136,36 @@ static timeUs_t escStatusLastUs[MAX_SUPPORTED_MOTORS];
 #define ESC_STATUS_AGE_INTERVAL_US  100000
 #define KELVIN_TO_CELSIUS       273.15f
 
+static float finiteOrZero(float value)
+{
+    uint32_t bits;
+    memcpy(&bits, &value, sizeof(bits));
+    return (bits & 0x7F800000U) == 0x7F800000U ? 0.0f : value;
+}
+
 static void handleEscStatus(CanardInstance *ins, CanardRxTransfer *t)
 {
     UNUSED(ins);
 
-    uint32_t errorCount = 0;
-    uint16_t voltageF16 = 0;
-    uint16_t currentF16 = 0;
-    uint16_t tempF16 = 0;
-    int32_t rpm = 0;
-    uint8_t powerPct = 0;
-    uint8_t escIndex = 0;
-
-    canardDecodeScalar(t, ESC_STATUS_OFFSET_ERROR_COUNT, 32, false, &errorCount);
-    canardDecodeScalar(t, ESC_STATUS_OFFSET_VOLTAGE,     16, false, &voltageF16);
-    canardDecodeScalar(t, ESC_STATUS_OFFSET_CURRENT,     16, false, &currentF16);
-    canardDecodeScalar(t, ESC_STATUS_OFFSET_TEMPERATURE, 16, false, &tempF16);
-    canardDecodeScalar(t, ESC_STATUS_OFFSET_RPM,         18, true,  &rpm);
-    canardDecodeScalar(t, ESC_STATUS_OFFSET_POWER_PCT,    7, false, &powerPct);
-    canardDecodeScalar(t, ESC_STATUS_OFFSET_ESC_INDEX,    5, false, &escIndex);
-
-    if (escIndex >= MAX_SUPPORTED_MOTORS) {
+    dronecanEscStatus_t status;
+    if (!dronecanEscDecodeStatus(t, &status) || status.index >= MAX_SUPPORTED_MOTORS) {
         return;
     }
 
-    const float voltage = canardConvertFloat16ToNativeFloat(voltageF16);
-    const float current = canardConvertFloat16ToNativeFloat(currentF16);
-    const float tempK   = canardConvertFloat16ToNativeFloat(tempF16);
-    const float tempC   = tempK - KELVIN_TO_CELSIUS;
-
+    const float tempC = finiteOrZero(status.temperatureKelvin) - KELVIN_TO_CELSIUS;
     escSensorData_t data;
     memset(&data, 0, sizeof(data));
-    data.voltage     = (uint16_t)constrainf(voltage * 100.0f, 0, UINT16_MAX);   // 0.01V
-    data.current     = (int32_t)constrainf(current * 100.0f, INT32_MIN, INT32_MAX); // 0.01A
-    data.temperature = (uint8_t)constrainf(tempC, 0, UINT8_MAX);                // °C
+    data.voltage     = (uint16_t)constrainf(finiteOrZero(status.voltage) * 100.0f, 0, UINT16_MAX);   // 0.01V
+    data.current     = (int32_t)(finiteOrZero(status.current) * 100.0f);                            // 0.01A
+    data.temperature = (uint8_t)constrainf(tempC, 0, UINT8_MAX);                      // °C
     // Status.rpm is electrical RPM; escSensorData.rpm is eRPM/100 (LSB = 100),
     // matching the DShot telemetry convention so erpmToRpm() agrees downstream.
-    data.rpm         = (int16_t)constrainf(rpm / 100.0f, INT16_MIN, INT16_MAX);
+    data.rpm         = (int16_t)constrainf(status.rpm / 100.0f, INT16_MIN, INT16_MAX);
     // consumption (mAh) isn't carried by esc.Status; leave 0 (battery falls
     // back to its own coulomb counter).
 
-    escSensorSetExternal(escIndex, &data);
-    escStatusLastUs[escIndex] = micros();
+    escSensorSetExternal(status.index, &data);
+    escStatusLastUs[status.index] = micros();
 }
 
 #endif // USE_ESC_SENSOR
