@@ -28,6 +28,42 @@
 
 #include "drivers/compass/compass.h"
 
+typedef struct bmm350Comp_s {
+    float offsetX;
+    float offsetY;
+    float offsetZ;
+    float offsetTemp;
+    float sensitX;
+    float sensitY;
+    float sensitZ;
+    float sensitTemp;
+    float tcoX;
+    float tcoY;
+    float tcoZ;
+    float tcsX;
+    float tcsY;
+    float tcsZ;
+    float t0;
+    float crossXY;
+    float crossYX;
+    float crossZX;
+    float crossZY;
+} bmm350Comp_t;
+
+typedef struct bmm350State_s {
+    bmm350Comp_t comp;
+    uint8_t receiveBuffer[14]; // Two I2C dummy bytes and four 24-bit channels.
+    bool readInProgress;
+    bool trimValid;
+    bool magneticResetComplete;
+} bmm350State_t;
+
+/* The caller keeps state alive until all outstanding reads have finished. */
+bool bmm350DetectWithState(magDev_t *magDev, bmm350State_t *state);
+
+/* Start or finish an asynchronous acquisition. Results are in uT and deg C. */
+bool bmm350ReadSample(magDev_t *magDev, float magnetic[3], float *temperature);
+
 /**
  * @brief Detect a BMM350 on I2C and install init/read callbacks.
  *

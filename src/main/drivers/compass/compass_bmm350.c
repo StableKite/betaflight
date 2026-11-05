@@ -146,29 +146,7 @@ static const uint8_t bmm350I2cAddresses[] = {
 };
 
 // Per-unit OTP trim. Zeroed if OTP read fails (uncompensated field still usable).
-typedef struct bmm350Comp_s {
-    float offsetX;
-    float offsetY;
-    float offsetZ;
-    float offsetTemp;
-    float sensitX;
-    float sensitY;
-    float sensitZ;
-    float sensitTemp;
-    float tcoX;
-    float tcoY;
-    float tcoZ;
-    float tcsX;
-    float tcsY;
-    float tcsZ;
-    float t0;
-    float crossXY;
-    float crossYX;
-    float crossZX;
-    float crossZY;
-} bmm350Comp_t;
-
-static bmm350Comp_t bmm350Comp;
+static bmm350State_t defaultState;
 
 /**
  * @brief Read registers, discarding the two dummy bytes the BMM350 prepends.
@@ -288,34 +266,34 @@ static float bmm350SignExtend12(uint16_t value)
 /**
  * @brief Unpack OTP words into bmm350Comp (Bosch SensorAPI / ArduPilot layout).
  */
-static void bmm350ParseOtp(const uint16_t *otpData)
+static void bmm350ParseOtp(bmm350Comp_t *comp, const uint16_t *otpData)
 {
-    bmm350Comp.offsetX = bmm350SignExtend12(otpData[BMM350_OTP_MAG_OFFSET_X] & 0x0FFF);
-    bmm350Comp.offsetY = bmm350SignExtend12(((otpData[BMM350_OTP_MAG_OFFSET_X] & 0xF000) >> 4)
+    comp->offsetX = bmm350SignExtend12(otpData[BMM350_OTP_MAG_OFFSET_X] & 0x0FFF);
+    comp->offsetY = bmm350SignExtend12(((otpData[BMM350_OTP_MAG_OFFSET_X] & 0xF000) >> 4)
         + (otpData[BMM350_OTP_MAG_OFFSET_Y] & 0x00FF));
-    bmm350Comp.offsetZ = bmm350SignExtend12((otpData[BMM350_OTP_MAG_OFFSET_Y] & 0x0F00)
+    comp->offsetZ = bmm350SignExtend12((otpData[BMM350_OTP_MAG_OFFSET_Y] & 0x0F00)
         + (otpData[BMM350_OTP_MAG_OFFSET_Z] & 0x00FF));
-    bmm350Comp.offsetTemp = (float)((int8_t)otpData[BMM350_OTP_TEMP_OFF_SENS]) * (1.0f / 5.0f);
+    comp->offsetTemp = (float)((int8_t)otpData[BMM350_OTP_TEMP_OFF_SENS]) * (1.0f / 5.0f);
 
-    bmm350Comp.sensitX = (float)((int8_t)((otpData[BMM350_OTP_MAG_SENS_X] & 0xFF00) >> 8)) * (1.0f / 256.0f);
-    bmm350Comp.sensitY = (float)((int8_t)otpData[BMM350_OTP_MAG_SENS_Y]) * (1.0f / 256.0f) + BMM350_SENS_CORR_Y;
-    bmm350Comp.sensitZ = (float)((int8_t)((otpData[BMM350_OTP_MAG_SENS_Z] & 0xFF00) >> 8)) * (1.0f / 256.0f);
-    bmm350Comp.sensitTemp = (float)((int8_t)((otpData[BMM350_OTP_TEMP_OFF_SENS] & 0xFF00) >> 8)) * (1.0f / 512.0f);
+    comp->sensitX = (float)((int8_t)((otpData[BMM350_OTP_MAG_SENS_X] & 0xFF00) >> 8)) * (1.0f / 256.0f);
+    comp->sensitY = (float)((int8_t)otpData[BMM350_OTP_MAG_SENS_Y]) * (1.0f / 256.0f) + BMM350_SENS_CORR_Y;
+    comp->sensitZ = (float)((int8_t)((otpData[BMM350_OTP_MAG_SENS_Z] & 0xFF00) >> 8)) * (1.0f / 256.0f);
+    comp->sensitTemp = (float)((int8_t)((otpData[BMM350_OTP_TEMP_OFF_SENS] & 0xFF00) >> 8)) * (1.0f / 512.0f);
 
-    bmm350Comp.tcoX = (float)((int8_t)otpData[BMM350_OTP_MAG_TCO_X]) * (1.0f / 32.0f);
-    bmm350Comp.tcoY = (float)((int8_t)otpData[BMM350_OTP_MAG_TCO_Y]) * (1.0f / 32.0f);
-    bmm350Comp.tcoZ = (float)((int8_t)otpData[BMM350_OTP_MAG_TCO_Z]) * (1.0f / 32.0f);
+    comp->tcoX = (float)((int8_t)otpData[BMM350_OTP_MAG_TCO_X]) * (1.0f / 32.0f);
+    comp->tcoY = (float)((int8_t)otpData[BMM350_OTP_MAG_TCO_Y]) * (1.0f / 32.0f);
+    comp->tcoZ = (float)((int8_t)otpData[BMM350_OTP_MAG_TCO_Z]) * (1.0f / 32.0f);
 
-    bmm350Comp.tcsX = (float)((int8_t)((otpData[BMM350_OTP_MAG_TCS_X] & 0xFF00) >> 8)) * (1.0f / 16384.0f);
-    bmm350Comp.tcsY = (float)((int8_t)((otpData[BMM350_OTP_MAG_TCS_Y] & 0xFF00) >> 8)) * (1.0f / 16384.0f);
-    bmm350Comp.tcsZ = (float)((int8_t)((otpData[BMM350_OTP_MAG_TCS_Z] & 0xFF00) >> 8)) * (1.0f / 16384.0f) - BMM350_TCS_CORR_Z;
+    comp->tcsX = (float)((int8_t)((otpData[BMM350_OTP_MAG_TCS_X] & 0xFF00) >> 8)) * (1.0f / 16384.0f);
+    comp->tcsY = (float)((int8_t)((otpData[BMM350_OTP_MAG_TCS_Y] & 0xFF00) >> 8)) * (1.0f / 16384.0f);
+    comp->tcsZ = (float)((int8_t)((otpData[BMM350_OTP_MAG_TCS_Z] & 0xFF00) >> 8)) * (1.0f / 16384.0f) - BMM350_TCS_CORR_Z;
 
-    bmm350Comp.t0 = (float)((int16_t)otpData[BMM350_OTP_MAG_DUT_T_0]) * (1.0f / 512.0f) + 23.0f;
+    comp->t0 = (float)((int16_t)otpData[BMM350_OTP_MAG_DUT_T_0]) * (1.0f / 512.0f) + 23.0f;
 
-    bmm350Comp.crossXY = (float)((int8_t)otpData[BMM350_OTP_CROSS_X_Y]) * (1.0f / 800.0f);
-    bmm350Comp.crossYX = (float)((int8_t)((otpData[BMM350_OTP_CROSS_Y_X] & 0xFF00) >> 8)) * (1.0f / 800.0f);
-    bmm350Comp.crossZX = (float)((int8_t)otpData[BMM350_OTP_CROSS_Z_X]) * (1.0f / 800.0f);
-    bmm350Comp.crossZY = (float)((int8_t)((otpData[BMM350_OTP_CROSS_Z_Y] & 0xFF00) >> 8)) * (1.0f / 800.0f);
+    comp->crossXY = (float)((int8_t)otpData[BMM350_OTP_CROSS_X_Y]) * (1.0f / 800.0f);
+    comp->crossYX = (float)((int8_t)((otpData[BMM350_OTP_CROSS_Y_X] & 0xFF00) >> 8)) * (1.0f / 800.0f);
+    comp->crossZX = (float)((int8_t)otpData[BMM350_OTP_CROSS_Z_X]) * (1.0f / 800.0f);
+    comp->crossZY = (float)((int8_t)((otpData[BMM350_OTP_CROSS_Z_Y] & 0xFF00) >> 8)) * (1.0f / 800.0f);
 }
 
 /**
@@ -360,35 +338,37 @@ static int32_t bmm350Assemble21(const uint8_t *bytes)
 }
 
 /**
- * @brief Convert 21-bit raw samples to compensated milligauss.
+ * @brief Convert raw samples to compensated microtesla and degrees Celsius.
  */
-static void bmm350Compensate(int32_t rawX, int32_t rawY, int32_t rawZ, int32_t rawTemp, int16_t *magData)
+static void bmm350Compensate(const bmm350Comp_t *comp, int32_t rawX, int32_t rawY, int32_t rawZ,
+                             int32_t rawTemp, float magnetic[3], float *temperature)
 {
     float magx = (float)rawX * BMM350_XY_SCALE;
     float magy = (float)rawY * BMM350_XY_SCALE;
     float magz = (float)rawZ * BMM350_Z_SCALE;
     float temp = ((float)rawTemp * BMM350_TEMP_SCALE) - 25.49f;
 
-    temp = ((1.0f + bmm350Comp.sensitTemp) * temp) + bmm350Comp.offsetTemp;
+    temp = ((1.0f + comp->sensitTemp) * temp) + comp->offsetTemp;
 
-    magx = ((1.0f + bmm350Comp.sensitX) * magx) + bmm350Comp.offsetX + (bmm350Comp.tcoX * (temp - bmm350Comp.t0));
-    magx /= 1.0f + bmm350Comp.tcsX * (temp - bmm350Comp.t0);
+    magx = ((1.0f + comp->sensitX) * magx) + comp->offsetX + (comp->tcoX * (temp - comp->t0));
+    magx /= 1.0f + comp->tcsX * (temp - comp->t0);
 
-    magy = ((1.0f + bmm350Comp.sensitY) * magy) + bmm350Comp.offsetY + (bmm350Comp.tcoY * (temp - bmm350Comp.t0));
-    magy /= 1.0f + bmm350Comp.tcsY * (temp - bmm350Comp.t0);
+    magy = ((1.0f + comp->sensitY) * magy) + comp->offsetY + (comp->tcoY * (temp - comp->t0));
+    magy /= 1.0f + comp->tcsY * (temp - comp->t0);
 
-    magz = ((1.0f + bmm350Comp.sensitZ) * magz) + bmm350Comp.offsetZ + (bmm350Comp.tcoZ * (temp - bmm350Comp.t0));
-    magz /= 1.0f + bmm350Comp.tcsZ * (temp - bmm350Comp.t0);
+    magz = ((1.0f + comp->sensitZ) * magz) + comp->offsetZ + (comp->tcoZ * (temp - comp->t0));
+    magz /= 1.0f + comp->tcsZ * (temp - comp->t0);
 
-    const float denom = 1.0f - bmm350Comp.crossYX * bmm350Comp.crossXY;
-    const float crX = (magx - bmm350Comp.crossXY * magy) / denom;
-    const float crY = (magy - bmm350Comp.crossYX * magx) / denom;
-    const float crZ = magz + (magx * (bmm350Comp.crossYX * bmm350Comp.crossZY - bmm350Comp.crossZX)
-        - magy * (bmm350Comp.crossZY - bmm350Comp.crossXY * bmm350Comp.crossZX)) / denom;
+    const float denom = 1.0f - comp->crossYX * comp->crossXY;
+    const float crX = (magx - comp->crossXY * magy) / denom;
+    const float crY = (magy - comp->crossYX * magx) / denom;
+    const float crZ = magz + (magx * (comp->crossYX * comp->crossZY - comp->crossZX)
+        - magy * (comp->crossZY - comp->crossXY * comp->crossZX)) / denom;
 
-    magData[X] = (int16_t)constrain(lrintf(crX * BMM350_UT_TO_MILLIGAUSS), INT16_MIN, INT16_MAX);
-    magData[Y] = (int16_t)constrain(lrintf(crY * BMM350_UT_TO_MILLIGAUSS), INT16_MIN, INT16_MAX);
-    magData[Z] = (int16_t)constrain(lrintf(crZ * BMM350_UT_TO_MILLIGAUSS), INT16_MIN, INT16_MAX);
+    magnetic[X] = crX;
+    magnetic[Y] = crY;
+    magnetic[Z] = crZ;
+    *temperature = temp;
 }
 
 /**
@@ -432,15 +412,17 @@ static bool bmm350Init(magDev_t *magDev)
         return false;
     }
 
+    bmm350State_t *state = (bmm350State_t *)dev->callbackArg;
     uint16_t otpData[BMM350_OTP_DATA_LENGTH];
-    memset(&bmm350Comp, 0, sizeof(bmm350Comp));
-    if (bmm350ReadOtp(dev, otpData)) {
-        bmm350ParseOtp(otpData);
+    memset(&state->comp, 0, sizeof(state->comp));
+    state->trimValid = bmm350ReadOtp(dev, otpData);
+    if (state->trimValid) {
+        bmm350ParseOtp(&state->comp, otpData);
     }
     busWriteRegister(dev, BMM350_REG_OTP_CMD, BMM350_OTP_CMD_PWR_OFF_OTP);
 
     // BR/FGR needs the 2.2 uF CRST capacitor. Still enter normal mode if reset times out.
-    bmm350MagReset(dev);
+    state->magneticResetComplete = bmm350MagReset(dev);
 
     const uint8_t intCtrl = BMM350_INT_MODE_PULSED | BMM350_INT_POL_ACTIVE_HIGH
         | BMM350_INT_OD_PUSHPULL | BMM350_INT_OUTPUT_DISABLE | BMM350_INT_DRDY_EN;
@@ -469,22 +451,23 @@ static bool bmm350Init(magDev_t *magDev)
 }
 
 /**
- * @brief Start a burst read of XYZ and temperature, then compensate it into milligauss on the next call.
+ * @brief Start a burst read of XYZ and temperature, then compensate on the next call.
  *
  * Does not wait for INT_STATUS DRDY; that bit is unreliable on some silicon
  * while the data registers are still valid.
  */
-static bool bmm350Read(magDev_t *magDev, int16_t *magData)
+bool bmm350ReadSample(magDev_t *magDev, float magnetic[3], float *temperature)
 {
-    static uint8_t buf[BMM350_I2C_DUMMY_BYTES + BMM350_MEAS_BYTES];
-    static bool pendingRead = true;
-
     extDevice_t *dev = &magDev->dev;
+    bmm350State_t *state = (bmm350State_t *)dev->callbackArg;
+    if (!state || !magnetic || !temperature) {
+        return false;
+    }
+    STATIC_ASSERT(sizeof(state->receiveBuffer) == BMM350_I2C_DUMMY_BYTES + BMM350_MEAS_BYTES, bmm350_receive_buffer_size);
 
-    if (pendingRead) {
-        if (busReadRegisterBufferStart(dev, BMM350_REG_MAG_X_XLSB, buf, sizeof(buf))) {
-            pendingRead = false;
-        }
+    if (!state->readInProgress) {
+        state->readInProgress = busReadRegisterBufferStart(
+            dev, BMM350_REG_MAG_X_XLSB, state->receiveBuffer, sizeof(state->receiveBuffer));
         return false;
     }
 
@@ -492,55 +475,73 @@ static bool bmm350Read(magDev_t *magDev, int16_t *magData)
     if (busBusy(dev, &error)) {
         return false;
     }
-
-    pendingRead = true;
-
+    state->readInProgress = false;
     if (error) {
         return false;
     }
 
-    const uint8_t *data = &buf[BMM350_I2C_DUMMY_BYTES];
-    const int32_t rawX = bmm350Assemble21(&data[0]);
-    const int32_t rawY = bmm350Assemble21(&data[3]);
-    const int32_t rawZ = bmm350Assemble21(&data[6]);
-    const int32_t rawTemp = bmm350Assemble21(&data[9]);
+    const uint8_t *data = &state->receiveBuffer[BMM350_I2C_DUMMY_BYTES];
+    bmm350Compensate(&state->comp, bmm350Assemble21(&data[0]), bmm350Assemble21(&data[3]),
+                    bmm350Assemble21(&data[6]), bmm350Assemble21(&data[9]), magnetic, temperature);
+    return true;
+}
 
-    bmm350Compensate(rawX, rawY, rawZ, rawTemp, magData);
+static bool bmm350Read(magDev_t *magDev, int16_t *magData)
+{
+    float magnetic[3], temperature;
+    if (!bmm350ReadSample(magDev, magnetic, &temperature)) {
+        return false;
+    }
 
+    for (unsigned axis = 0; axis < XYZ_AXIS_COUNT; ++axis) {
+        magData[axis] = (int16_t)constrain(lrintf(magnetic[axis] * BMM350_UT_TO_MILLIGAUSS), INT16_MIN, INT16_MAX);
+    }
     return true;
 }
 
 /**
  * @brief Detect a BMM350 on I2C and install init/read callbacks.
  */
-bool bmm350Detect(magDev_t *magDev)
+bool bmm350DetectWithState(magDev_t *magDev, bmm350State_t *state)
 {
+    if (!state) {
+        return false;
+    }
     extDevice_t *dev = &magDev->dev;
-
-    delay(3);
-
-    if (dev->bus->busType == BUS_TYPE_I2C && dev->busType_u.i2c.address != 0) {
-        if (bmm350Probe(magDev)) {
-            magDev->init = bmm350Init;
-            magDev->read = bmm350Read;
-            return true;
-        }
+    if (dev->bus->busType != BUS_TYPE_I2C) {
         return false;
     }
 
-    if (dev->bus->busType == BUS_TYPE_I2C && dev->busType_u.i2c.address == 0) {
+    delay(3);
+    if (dev->busType_u.i2c.address != 0) {
+        if (!bmm350Probe(magDev)) {
+            return false;
+        }
+    } else {
+        bool detected = false;
         for (unsigned i = 0; i < ARRAYLEN(bmm350I2cAddresses); i++) {
             dev->busType_u.i2c.address = bmm350I2cAddresses[i];
             if (bmm350Probe(magDev)) {
-                magDev->init = bmm350Init;
-                magDev->read = bmm350Read;
-                return true;
+                detected = true;
+                break;
             }
         }
-        dev->busType_u.i2c.address = 0;
+        if (!detected) {
+            dev->busType_u.i2c.address = 0;
+            return false;
+        }
     }
 
-    return false;
+    memset(state, 0, sizeof(*state));
+    dev->callbackArg = (uintptr_t)state;
+    magDev->init = bmm350Init;
+    magDev->read = bmm350Read;
+    return true;
+}
+
+bool bmm350Detect(magDev_t *magDev)
+{
+    return bmm350DetectWithState(magDev, &defaultState);
 }
 
 #endif // USE_MAG_BMM350

@@ -282,3 +282,31 @@ TEST(Bmm350ReadTest, BusErrorDropsTheSampleAndStartsAgain)
     EXPECT_TRUE(mag.read(&mag, magData));
     EXPECT_EQ(0, magData[0]);
 }
+
+TEST(Bmm350ReadTest, InterleavedDevicesKeepCalibrationAndReadStateSeparate)
+{
+    resetMocks();
+
+    magDev_t first, second;
+    busDevice_t firstBus, secondBus;
+    bmm350State_t firstState, secondState;
+    initMagDev(&first, &firstBus, BMM350_I2C_ADDRESS_ADSEL_GND);
+    initMagDev(&second, &secondBus, BMM350_I2C_ADDRESS_ADSEL_VDDIO);
+    ASSERT_TRUE(bmm350DetectWithState(&first, &firstState));
+    ASSERT_TRUE(bmm350DetectWithState(&second, &secondState));
+    firstState.comp.offsetX = 12.25f;
+    firstState.comp.offsetTemp = 3.0f;
+    secondState.comp.offsetX = -20.75f;
+    secondState.comp.offsetTemp = -2.0f;
+
+    float magnetic[3], temperature;
+    EXPECT_FALSE(bmm350ReadSample(&first, magnetic, &temperature));
+    EXPECT_FALSE(bmm350ReadSample(&second, magnetic, &temperature));
+    EXPECT_EQ(2, readStartCount);
+    ASSERT_TRUE(bmm350ReadSample(&first, magnetic, &temperature));
+    EXPECT_FLOAT_EQ(12.25f, magnetic[0]);
+    EXPECT_NEAR(-22.49f, temperature, 0.001f);
+    ASSERT_TRUE(bmm350ReadSample(&second, magnetic, &temperature));
+    EXPECT_FLOAT_EQ(-20.75f, magnetic[0]);
+    EXPECT_NEAR(-27.49f, temperature, 0.001f);
+}
