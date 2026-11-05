@@ -111,6 +111,7 @@
 #define BMM350_PMU_STATUS_CMD_SHIFT     5
 
 #define BMM350_ODR_100HZ                0x04
+#define BMM350_ODR_400HZ                0x02
 #define BMM350_AVERAGING_4              (0x02 << 4)
 #define BMM350_AXIS_EN_XYZ              0x07
 
@@ -430,7 +431,9 @@ static bool bmm350Init(magDev_t *magDev)
         return false;
     }
 
-    if (!busWriteRegister(dev, BMM350_REG_PMU_CMD_AGGR_SET, BMM350_AVERAGING_4 | BMM350_ODR_100HZ)) {
+    const uint8_t aggregation = state->rate == BMM350_RATE_400_HZ
+        ? BMM350_ODR_400HZ : (BMM350_AVERAGING_4 | BMM350_ODR_100HZ);
+    if (!busWriteRegister(dev, BMM350_REG_PMU_CMD_AGGR_SET, aggregation)) {
         return false;
     }
     if (!busWriteRegister(dev, BMM350_REG_PMU_CMD, BMM350_PMU_CMD_UPD_OAE)) {
@@ -446,7 +449,7 @@ static bool bmm350Init(magDev_t *magDev)
         return false;
     }
 
-    magDev->magOdrHz = 100;
+    magDev->magOdrHz = state->rate;
     return true;
 }
 
@@ -502,9 +505,9 @@ static bool bmm350Read(magDev_t *magDev, int16_t *magData)
 /**
  * @brief Detect a BMM350 on I2C and install init/read callbacks.
  */
-bool bmm350DetectWithState(magDev_t *magDev, bmm350State_t *state)
+bool bmm350DetectWithState(magDev_t *magDev, bmm350State_t *state, bmm350Rate_e rate)
 {
-    if (!state) {
+    if (!state || (rate != BMM350_RATE_100_HZ && rate != BMM350_RATE_400_HZ)) {
         return false;
     }
     extDevice_t *dev = &magDev->dev;
@@ -533,6 +536,7 @@ bool bmm350DetectWithState(magDev_t *magDev, bmm350State_t *state)
     }
 
     memset(state, 0, sizeof(*state));
+    state->rate = rate;
     dev->callbackArg = (uintptr_t)state;
     magDev->init = bmm350Init;
     magDev->read = bmm350Read;
@@ -541,7 +545,7 @@ bool bmm350DetectWithState(magDev_t *magDev, bmm350State_t *state)
 
 bool bmm350Detect(magDev_t *magDev)
 {
-    return bmm350DetectWithState(magDev, &defaultState);
+    return bmm350DetectWithState(magDev, &defaultState, BMM350_RATE_100_HZ);
 }
 
 #endif // USE_MAG_BMM350

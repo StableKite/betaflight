@@ -292,8 +292,8 @@ TEST(Bmm350ReadTest, InterleavedDevicesKeepCalibrationAndReadStateSeparate)
     bmm350State_t firstState, secondState;
     initMagDev(&first, &firstBus, BMM350_I2C_ADDRESS_ADSEL_GND);
     initMagDev(&second, &secondBus, BMM350_I2C_ADDRESS_ADSEL_VDDIO);
-    ASSERT_TRUE(bmm350DetectWithState(&first, &firstState));
-    ASSERT_TRUE(bmm350DetectWithState(&second, &secondState));
+    ASSERT_TRUE(bmm350DetectWithState(&first, &firstState, BMM350_RATE_100_HZ));
+    ASSERT_TRUE(bmm350DetectWithState(&second, &secondState, BMM350_RATE_400_HZ));
     firstState.comp.offsetX = 12.25f;
     firstState.comp.offsetTemp = 3.0f;
     secondState.comp.offsetX = -20.75f;

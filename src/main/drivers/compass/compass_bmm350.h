@@ -50,16 +50,22 @@ typedef struct bmm350Comp_s {
     float crossZY;
 } bmm350Comp_t;
 
+typedef enum {
+    BMM350_RATE_100_HZ = 100,
+    BMM350_RATE_400_HZ = 400,
+} bmm350Rate_e;
+
 typedef struct bmm350State_s {
     bmm350Comp_t comp;
     uint8_t receiveBuffer[14]; // Two I2C dummy bytes and four 24-bit channels.
+    bmm350Rate_e rate;
     bool readInProgress;
     bool trimValid;
     bool magneticResetComplete;
 } bmm350State_t;
 
 /* The caller keeps state alive until all outstanding reads have finished. */
-bool bmm350DetectWithState(magDev_t *magDev, bmm350State_t *state);
+bool bmm350DetectWithState(magDev_t *magDev, bmm350State_t *state, bmm350Rate_e rate);
 
 /* Start or finish an asynchronous acquisition. Results are in uT and deg C. */
 bool bmm350ReadSample(magDev_t *magDev, float magnetic[3], float *temperature);
