@@ -48,6 +48,9 @@ void dronecanEscUpdate(timeUs_t currentTimeUs);
 void dronecanEscWrite(uint8_t motorIndex, float value);
 void dronecanEscUpdateComplete(void);
 
+// Copied diagnostics from the active native motor device, in RawCommand units.
+bool dronecanEscObserve(uint8_t *motorCount, int16_t *values, uint8_t capacity, uint64_t *transfers);
+
 // Motor-driver entry points (called from drivers/motor.c). Populate the motor
 // vtable and define the output endpoints for the DRONECAN protocol family.
 bool dronecanMotorDevInit(motorDevice_t *device, uint8_t motorCount);

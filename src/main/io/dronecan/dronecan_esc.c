@@ -71,6 +71,21 @@
 static int16_t escStaging[MAX_SUPPORTED_MOTORS];
 
 static uint8_t escRawCommandTransferId;
+static uint8_t escMotorCount;
+static bool escMotorInitialized;
+static bool escMotorEnabled;
+static uint64_t escTransfers;
+
+bool dronecanEscObserve(uint8_t *motorCount, int16_t *values, uint8_t capacity, uint64_t *transfers)
+{
+    if (!escMotorInitialized || !motorCount || !values || !transfers || capacity < escMotorCount) {
+        return false;
+    }
+    *motorCount = escMotorCount;
+    *transfers = escTransfers;
+    memcpy(values, escStaging, escMotorCount * sizeof(*values));
+    return true;
+}
 
 // Rate gate for PID-loop emission. Period is derived from esc_rate_hz at init.
 static uint32_t escBroadcastPeriodUs;
@@ -93,7 +108,9 @@ static void emitRawCommand(void)
     if (!dronecanIsInitialised()) {
         return;
     }
-    dronecanEscBroadcastRaw(dronecanGetInstance(), escStaging, getMotorCount(), &escRawCommandTransferId);
+    if (dronecanEscBroadcastRaw(dronecanGetInstance(), escStaging, escMotorCount, &escRawCommandTransferId) > 0) {
+        escTransfers++;
+    }
     // Flush straight to the driver so the frame rides out on this PID iteration
     // if the bus is free; the driver's SW ring + TC interrupt absorb the rest.
     dronecanFlushTx();
@@ -233,7 +250,8 @@ void dronecanEscUpdate(timeUs_t currentTimeUs)
 
 static bool dronecanMotorEnable(void)
 {
-    return true;
+    escMotorEnabled = escMotorInitialized && dronecanIsInitialised();
+    return escMotorEnabled;
 }
 
 static void dronecanMotorDisable(void)
@@ -241,6 +259,7 @@ static void dronecanMotorDisable(void)
     // Park every motor at stop and force a zero RawCommand out now (bypassing
     // the rate gate) so the ESCs see the stop immediately rather than on the
     // next due period.
+    escMotorEnabled = false;
     memset(escStaging, 0, sizeof(escStaging));
     escLastBroadcastUs = micros();
     emitRawCommand();
@@ -248,8 +267,7 @@ static void dronecanMotorDisable(void)
 
 static bool dronecanMotorIsEnabled(unsigned index)
 {
-    UNUSED(index);
-    return true;
+    return index < escMotorCount && escMotorEnabled;
 }
 
 static void dronecanMotorShutdown(void)
@@ -285,6 +303,13 @@ static const motorVTable_t dronecanMotorVTable = {
 
 bool dronecanMotorDevInit(motorDevice_t *device, uint8_t motorCount)
 {
+    if (!device || !motorCount || motorCount > MAX_SUPPORTED_MOTORS || featureIsEnabled(FEATURE_3D)) {
+        return false;
+    }
+    escMotorCount = motorCount;
+    escMotorInitialized = true;
+    escMotorEnabled = false;
+    escTransfers = 0;
     device->vTable = &dronecanMotorVTable;
     device->count = motorCount;
     return true;
