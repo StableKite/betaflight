@@ -3918,11 +3918,11 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
 #endif
 
 #ifdef USE_GPS
-    case MSP2_SENSOR_GPS:
+    case MSP2_SENSOR_GPS: {
         (void)sbufReadU8(src);              // instance
         (void)sbufReadU16(src);             // gps_week
         gpsSol.time = sbufReadU32(src);     // ms_tow
-        gpsSetFixState(sbufReadU8(src) != 0); // fix_type
+        const bool fix = sbufReadU8(src) != 0; // fix_type
         gpsSol.numSat = sbufReadU8(src);    // satellites_in_view
         gpsSol.acc.hAcc = sbufReadU16(src) * 10; // horizontal_pos_accuracy - convert cm to mm
         gpsSol.acc.vAcc = sbufReadU16(src) * 10; // vertical_pos_accuracy - convert cm to mm
@@ -3945,18 +3945,20 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
         (void)sbufReadU8(src);              // hour
         (void)sbufReadU8(src);              // min
         (void)sbufReadU8(src);              // sec
-        GPS_update |= GPS_MSP_UPDATE;        // MSP data signalisation to GPS functions
+        gpsMspFrameReceive(&gpsSol, fix);
         break;
+    }
 
-    case MSP_SET_RAW_GPS:
-        gpsSetFixState(sbufReadU8(src));
+    case MSP_SET_RAW_GPS: {
+        const bool fix = sbufReadU8(src);
         gpsSol.numSat = sbufReadU8(src);
         gpsSol.llh.lat = sbufReadU32(src);
         gpsSol.llh.lon = sbufReadU32(src);
         gpsSol.llh.altCm = sbufReadU16(src) * 100; // alt changed from 1m to 0.01m per lsb since MSP API 1.39 by RTH. Received MSP altitudes in 1m per lsb have to upscaled.
         gpsSol.groundSpeed = sbufReadU16(src);
-        GPS_update |= GPS_MSP_UPDATE;        // MSP data signalisation to GPS functions
+        gpsMspFrameReceive(&gpsSol, fix);
         break;
+    }
 #endif // USE_GPS
     case MSP_SET_FEATURE_CONFIG:
         featureConfigReplace(sbufReadU32(src));

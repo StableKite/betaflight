@@ -418,6 +418,14 @@ void GPS_distance_cm_bearing(const gpsLocation_t *from, const gpsLocation_t *to,
 void GPS_distance2d(const gpsLocation_t *from, const gpsLocation_t *to, vector2_t *distance);
 
 void gpsSetFixState(bool state);
+// Supply a decoded measurement to the MSP provider. The GPS task consumes it
+// and owns navigation and receive timeout behavior, as for a serial MSP frame.
+static inline void gpsMspFrameReceive(const gpsSolutionData_t *solution, bool fix)
+{
+    gpsSol = *solution;
+    gpsSetFixState(fix);
+    GPS_update |= GPS_MSP_UPDATE;
+}
 
 bool gpsHasNewData(uint16_t *stamp);
 float getGpsDataIntervalSeconds(void);  // range 0.05 - 2.5s
