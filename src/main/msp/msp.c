@@ -3931,9 +3931,11 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
         gpsSol.llh.lon = sbufReadU32(src);
         gpsSol.llh.lat = sbufReadU32(src);
         gpsSol.llh.altCm = sbufReadU32(src); // alt
-        int32_t ned_vel_north = (int32_t)sbufReadU32(src);  // ned_vel_north
-        int32_t ned_vel_east = (int32_t)sbufReadU32(src);   // ned_vel_east
-        gpsSol.groundSpeed = (uint16_t)sqrtf((ned_vel_north * ned_vel_north) + (ned_vel_east * ned_vel_east));
+        const float ned_vel_north = (int32_t)sbufReadU32(src);  // ned_vel_north
+        const float ned_vel_east = (int32_t)sbufReadU32(src);   // ned_vel_east
+        // Square in floating point to avoid signed overflow, then saturate to
+        // the solution's uint16_t speed range before converting.
+        gpsSol.groundSpeed = (uint16_t)constrainf(sqrtf((ned_vel_north * ned_vel_north) + (ned_vel_east * ned_vel_east)), 0, UINT16_MAX);
         (void)sbufReadU32(src);             // ned_vel_down
         gpsSol.groundCourse = ((uint16_t)sbufReadU16(src) % 36000) / 10; // incoming value expected to be in centidegrees, output value in decidegrees
         (void)sbufReadU16(src);             // true_yaw
