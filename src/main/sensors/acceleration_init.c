@@ -95,10 +95,13 @@ static void setConfigCalibrationCompleted(void)
 bool accHasBeenCalibrated(void)
 {
 #if ENABLE_SIMULATOR
-    return true;
-#else
-    return accelerometerConfig()->accZero.values.calibrationCompleted;
+    // Ideal virtual measurements need no calibration. A physical sensor in
+    // the simulator still needs the same persisted completion flag as an MCU.
+    if (detectedSensors[SENSOR_INDEX_ACC] == ACC_VIRTUAL) {
+        return true;
+    }
 #endif
+    return accelerometerConfig()->accZero.values.calibrationCompleted;
 }
 
 LOCAL_UNUSED_FUNCTION static void accResetRollAndPitchTrims(void)
