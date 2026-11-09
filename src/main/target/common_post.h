@@ -545,10 +545,12 @@
 #endif
 
 #if !defined(USE_OSD)
+#if !defined(USE_RX_MSP_LINK_STATISTICS)
 #undef USE_RX_LINK_QUALITY_INFO
+#undef USE_RX_LINK_UPLINK_POWER
+#endif
 #undef USE_OSD_PROFILES
 #undef USE_OSD_STICK_OVERLAY
-#undef USE_RX_LINK_UPLINK_POWER
 #endif
 
 // Older ACC/GYRO sensors use MPU6500 driver

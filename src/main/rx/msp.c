@@ -37,6 +37,26 @@ static uint16_t mspFrame[MAX_SUPPORTED_RC_CHANNEL_COUNT];
 static bool rxMspFrameDone = false;
 static bool rxMspOverrideFrameDone = false;
 
+#ifdef USE_RX_MSP_LINK_STATISTICS
+// Link statistics do not complete an RC frame or renew its receive timestamp.
+// In particular they must not postpone the original RX-loss failsafe.
+bool rxMspSetLinkStatistics(uint16_t rssi, uint8_t linkQuality, int16_t snr, uint16_t uplinkPowerMw)
+{
+    if (rxRuntimeState.rxProvider != RX_PROVIDER_MSP || rssi > RSSI_MAX_VALUE || linkQuality > 100 ||
+        (linkQualitySource != LQ_SOURCE_NONE && linkQualitySource != LQ_SOURCE_RX_PROTOCOL_MSP)) {
+        return false;
+    }
+
+    setRssiMsp(rssi >> 2);
+    setRssiDirect(rssi, RSSI_SOURCE_MSP);
+    linkQualitySource = LQ_SOURCE_RX_PROTOCOL_MSP;
+    setLinkQualityDirect(linkQuality);
+    setRsnrDirect(snr);
+    rxSetUplinkTxPwrMw(uplinkPowerMw);
+    return true;
+}
+#endif
+
 float rxMspReadRawRC(const rxRuntimeState_t *rxRuntimeState, uint8_t chan)
 {
     UNUSED(rxRuntimeState);

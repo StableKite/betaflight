@@ -25,4 +25,7 @@ struct rxRuntimeState_s;
 float rxMspReadRawRC(const rxRuntimeState_t *rxRuntimeState, uint8_t chan);
 void rxMspInit(const struct rxConfig_s *rxConfig, struct rxRuntimeState_s *rxRuntimeState);
 void rxMspFrameReceive(const uint16_t *frame, int channelCount);
+#ifdef USE_RX_MSP_LINK_STATISTICS
+bool rxMspSetLinkStatistics(uint16_t rssi, uint8_t linkQuality, int16_t snr, uint16_t uplinkPowerMw);
+#endif
 uint8_t rxMspOverrideFrameStatus(void);
