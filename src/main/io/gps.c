@@ -1483,7 +1483,7 @@ void gpsUpdate(timeUs_t currentTimeUs)
 
     case GPS_MSP:
         if (GPS_update & GPS_MSP_UPDATE) { // GPS data received via MSP
-            if (gpsData.state == GPS_STATE_INITIALIZED) {
+            if (gpsData.state != GPS_STATE_RECEIVING_DATA) {
                 gpsSetState(GPS_STATE_RECEIVING_DATA);
             }
 
@@ -1499,10 +1499,9 @@ void gpsUpdate(timeUs_t currentTimeUs)
             GPS_update &= ~GPS_MSP_UPDATE;
         } else {
             DEBUG_SET(DEBUG_GPS_CONNECTION, 2, gpsData.now - gpsData.lastNavMessage); // time since last Nav data, updated each GPS task interval
-            // check for no data/gps timeout/cable disconnection etc
-            if (cmp32(gpsData.now, gpsData.lastNavMessage) > GPS_TIMEOUT_MS) {
-                gpsSetState(GPS_STATE_LOST_COMMUNICATION);
-            }
+            // The common RECEIVING_DATA state owns the receive timeout.
+            // An offline MSP provider has no serial port to reconfigure;
+            // resume reception when the next complete message arrives.
         }
         break;
 #if defined(USE_VIRTUAL_GPS)
