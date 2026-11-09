@@ -146,6 +146,23 @@ void dronecanEscUpdateComplete(void)
 
 // Last-heard timestamp per ESC index, for aging stale telemetry slots.
 static timeUs_t escStatusLastUs[MAX_SUPPORTED_MOTORS];
+static dronecanEscSample_t escSamples[MAX_SUPPORTED_MOTORS];
+static uint64_t escSampleSequence;
+
+bool dronecanEscReadStatus(uint8_t motorIndex, dronecanEscSample_t *out)
+{
+    if (!out || motorIndex >= getMotorCount() || motorIndex >= MAX_SUPPORTED_MOTORS
+        || !escSamples[motorIndex].sequence) {
+        return false;
+    }
+    const escSensorData_t *sensor = getEscSensorData(motorIndex);
+    if (!sensor) {
+        return false;
+    }
+    *out = escSamples[motorIndex];
+    out->age = sensor->dataAge;
+    return true;
+}
 
 // Age quiet slots every 100 ms so a silent ESC crosses ESC_BATTERY_AGE_MAX
 // (10) in about a second — the same suppression timescale as the serial
@@ -168,6 +185,15 @@ static void handleEscStatus(CanardInstance *ins, CanardRxTransfer *t)
     if (!dronecanEscDecodeStatus(t, &status) || status.index >= MAX_SUPPORTED_MOTORS) {
         return;
     }
+
+    dronecanEscSample_t sample = { .status = status, .timestampUs = micros() };
+    for (uint32_t i = 0; i < sizeof(sample.payload); i++) {
+        if (canardDecodeScalar(t, i * 8U, 8, false, &sample.payload[i]) != 8) {
+            return;
+        }
+    }
+    sample.sequence = ++escSampleSequence;
+    escSamples[status.index] = sample;
 
     const float tempC = finiteOrZero(status.temperatureKelvin) - KELVIN_TO_CELSIUS;
     escSensorData_t data;
@@ -203,10 +229,9 @@ void dronecanEscInit(void)
     escLastBroadcastUs = micros();
 
 #if defined(USE_ESC_SENSOR)
-    for (int i = 0; i < MAX_SUPPORTED_MOTORS; i++) {
-        escStatusLastUs[i] = 0;
-    }
-
+    memset(escStatusLastUs, 0, sizeof(escStatusLastUs));
+    memset(escSamples, 0, sizeof(escSamples));
+    escSampleSequence = 0;
     escSensorExternalInit();
 
     const dronecanSubscriber_t sub = {

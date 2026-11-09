@@ -32,6 +32,7 @@
 #include "pg/motor.h"
 
 #include "drivers/motor_types.h"
+#include "io/dronecan/dronecan_esc_protocol.h"
 
 // Install the esc.Status subscriber (telemetry in) and reset the RawCommand
 // throttle buffer (command out). Called once from dronecanInit().
@@ -50,6 +51,19 @@ void dronecanEscUpdateComplete(void);
 
 // Copied diagnostics from the active native motor device, in RawCommand units.
 bool dronecanEscObserve(uint8_t *motorCount, int16_t *values, uint8_t capacity, uint64_t *transfers);
+
+#ifdef USE_ESC_SENSOR
+typedef struct dronecanEscSample_s {
+    dronecanEscStatus_t status;
+    timeUs_t timestampUs;
+    uint64_t sequence;
+    uint8_t age;
+    uint8_t payload[UAVCAN_ESC_STATUS_PAYLOAD_BYTES];
+} dronecanEscSample_t;
+
+// Caller and decoder share Betaflight's cooperative task owner.
+bool dronecanEscReadStatus(uint8_t motorIndex, dronecanEscSample_t *out);
+#endif
 
 // Motor-driver entry points (called from drivers/motor.c). Populate the motor
 // vtable and define the output endpoints for the DRONECAN protocol family.
