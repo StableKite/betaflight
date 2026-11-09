@@ -902,7 +902,7 @@ void setRssiMsp(uint8_t newMspRssi)
     }
 
     if (rssiSource == RSSI_SOURCE_MSP) {
-        rssi = ((uint16_t)newMspRssi) << 2;
+        setRssiDirect(((uint16_t)newMspRssi) << 2, RSSI_SOURCE_MSP);
         lastMspRssiUpdateUs = micros();
     }
 }
@@ -948,7 +948,7 @@ void updateRSSI(timeUs_t currentTimeUs)
         break;
     case RSSI_SOURCE_MSP:
         if (cmpTimeUs(micros(), lastMspRssiUpdateUs) > DELAY_1500_MS) {  // 1.5s
-            rssi = 0;
+            setRssiDirect(0, RSSI_SOURCE_MSP);
         }
         break;
     default:
