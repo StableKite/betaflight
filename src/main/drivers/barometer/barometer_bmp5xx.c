@@ -57,8 +57,8 @@
 #define BMP5XX_I2C_ADDR_SECONDARY   (0x46)  // SDO = LOW
 
 // Chip IDs
-#define BMP580_CHIP_ID              (0x50)
-#define BMP581_CHIP_ID              (0x51)
+#define BMP5XX_CHIP_ID_PRIMARY      (0x50)
+#define BMP5XX_CHIP_ID_SECONDARY    (0x51)
 
 // Register addresses
 #define BMP5XX_REG_CHIP_ID          (0x01)
@@ -328,7 +328,7 @@ static bool bmp5xxBeginForcedMeasurement(const extDevice_t *dev)
  * @brief Detect and initialize BMP580/BMP581 barometer
  * @param config Pointer to BMP5xx configuration (I2C/SPI settings)
  * @param baro Pointer to barometer device structure to initialize
- * @param detectedChip Pointer to store detected chip ID (0x50=BMP580, 0x51=BMP581), or NULL if not needed
+ * @param detectedChip Pointer to store the raw family ASIC ID (0x50 or 0x51), or NULL if not needed
  * @return true if BMP580/BMP581 detected and initialized, false otherwise
  * @note Configures sensor for Normal mode at 50Hz ODR with 16x pressure OSR,
  *       4x temperature OSR, and IIR filter coefficient 15
@@ -370,7 +370,7 @@ bool bmp5xxDetect(const bmp5xxConfig_t *config, baroDev_t *baro, uint8_t *detect
         goto failure;
     }
 
-    if (chipId != BMP580_CHIP_ID && chipId != BMP581_CHIP_ID) {
+    if (chipId != BMP5XX_CHIP_ID_PRIMARY && chipId != BMP5XX_CHIP_ID_SECONDARY) {
         // Try secondary I2C address
         if (defaultAddressApplied) {
             dev->busType_u.i2c.address = BMP5XX_I2C_ADDR_SECONDARY;
@@ -378,7 +378,7 @@ bool bmp5xxDetect(const bmp5xxConfig_t *config, baroDev_t *baro, uint8_t *detect
                 goto failure;
             }
 
-            if (chipId != BMP580_CHIP_ID && chipId != BMP581_CHIP_ID) {
+            if (chipId != BMP5XX_CHIP_ID_PRIMARY && chipId != BMP5XX_CHIP_ID_SECONDARY) {
                 bmp5xxBusDeinit(dev);
                 dev->busType_u.i2c.address = 0;
                 return false;

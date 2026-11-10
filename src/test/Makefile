@@ -100,6 +100,21 @@ baro_bmp388_unittest_DEFINES := \
                 USE_BARO_BMP388= \
                 USE_BARO_SPI_BMP388=
 
+baro_bmp5xx_detection_unittest_SRC := \
+		$(USER_DIR)/sensors/barometer.c
+
+baro_bmp5xx_detection_unittest_DEFINES := \
+                USE_I2C= \
+                USE_BARO_BMP580= \
+                USE_BARO_BMP581=
+
+baro_bmp5xx_detection_unittest_C_FLAGS := -ffunction-sections -fdata-sections
+ifeq ($(OSFAMILY), macosx)
+baro_bmp5xx_detection_unittest_LDFLAGS := -Wl,-dead_strip
+else
+baro_bmp5xx_detection_unittest_LDFLAGS := -Wl,--gc-sections
+endif
+
 baro_bmp5xx_unittest_SRC := \
 		$(USER_DIR)/drivers/barometer/barometer_bmp5xx.c
 
@@ -844,14 +859,14 @@ endif
 $(OBJECT_DIR)/$1/%.c.o: $(USER_DIR)/%.c
 	@echo "compiling $$<" "$(STDOUT)"
 	$(V1) mkdir -p $$(dir $$@)
-	$(V1) $(CC) $(C_FLAGS) $$(call test_cflags,$$($1_INCLUDE_DIRS)) \
+	$(V1) $(CC) $(C_FLAGS) $($1_C_FLAGS) $$(call test_cflags,$$($1_INCLUDE_DIRS)) \
                 $$(foreach def,$$($1_DEFINES),-D $$(def)) \
                 -c $$< -o $$@
 
 $(OBJECT_DIR)/$1/%.c.o: $(TEST_DIR)/%.c
 	@echo "compiling test c file: $$<" "$(STDOUT)"
 	$(V1) mkdir -p $$(dir $$@)
-	$(V1) $(CC) $(C_FLAGS) $$(call test_cflags,$$($1_INCLUDE_DIRS)) \
+	$(V1) $(CC) $(C_FLAGS) $($1_C_FLAGS) $$(call test_cflags,$$($1_INCLUDE_DIRS)) \
                 $$(foreach def,$$($1_DEFINES),-D $$(def)) \
                 -c $$< -o $$@
 
@@ -860,7 +875,7 @@ ifneq ($1,$(basename $1))
 $(OBJECT_DIR)/$1/%.c.o: $(TARGET_DIR)/$(TARGET)/%.c
 	@echo "compiling target c file: $$<" "$(STDOUT)"
 	$(V1) mkdir -p $$(dir $$@)
-	$(V1) $(CC) $(C_FLAGS) $$(call test_cflags,$$($1_INCLUDE_DIRS)) \
+	$(V1) $(CC) $(C_FLAGS) $($1_C_FLAGS) $$(call test_cflags,$$($1_INCLUDE_DIRS)) \
                 $$(foreach def,$$($1_DEFINES),-D $$(def)) \
                 -c $$< -o $$@
 endif
@@ -878,7 +893,7 @@ $(OBJECT_DIR)/$1/$(basename $1): $$($1_OBJS) \
 
 	@echo "linking $$@" "$(STDOUT)"
 	$(V1) mkdir -p $(dir $$@)
-	$(V1) $(CXX) $(CXX_FLAGS) $(LDFLAGS) $$^ -o $$@
+	$(V1) $(CXX) $(CXX_FLAGS) $(LDFLAGS) $($1_LDFLAGS) $$^ -o $$@
 
 test_$1: $(OBJECT_DIR)/$1/$(basename $1)
 	$(V1) $$< $$(EXEC_OPTS) "$(STDOUT)" && echo "running $$@: PASS"
