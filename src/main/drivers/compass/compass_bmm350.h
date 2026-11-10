@@ -26,6 +26,9 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "drivers/compass/compass.h"
 
 typedef struct bmm350Comp_s {
@@ -55,6 +58,12 @@ typedef enum {
     BMM350_RATE_400_HZ = 400,
 } bmm350Rate_e;
 
+typedef enum {
+    BMM350_SAMPLE_ERROR = -1,
+    BMM350_SAMPLE_PENDING = 0,
+    BMM350_SAMPLE_READY = 1,
+} bmm350ReadResult_e;
+
 typedef struct bmm350State_s {
     bmm350Comp_t comp;
     uint8_t receiveBuffer[14]; // Two I2C dummy bytes and four 24-bit channels.
@@ -62,13 +71,22 @@ typedef struct bmm350State_s {
     bool readInProgress;
     bool trimValid;
     bool magneticResetComplete;
+    bool pollingReady;
 } bmm350State_t;
 
-/* The caller keeps state alive until all outstanding reads have finished. */
+/* Keep state alive; detection and initialization require no outstanding read. */
 bool bmm350DetectWithState(magDev_t *magDev, bmm350State_t *state, bmm350Rate_e rate);
 
 /* Start or finish an asynchronous acquisition. Results are in uT and deg C. */
 bool bmm350ReadSample(magDev_t *magDev, float magnetic[3], float *temperature);
+
+/* Require valid OTP, magnetic reset and the exact rate/averaging profile, then
+ * configure latched DRDY for a poller without an external interrupt pin. */
+bool bmm350InitForPolling(magDev_t *magDev, bmm350State_t *state, bmm350Rate_e rate);
+
+/* Finish synchronous transfers immediately, or retain an asynchronous read.
+ * Outputs are unchanged while pending or on error. */
+bmm350ReadResult_e bmm350PollSample(magDev_t *magDev, float magnetic[3], float *temperature);
 
 /**
  * @brief Detect a BMM350 on I2C and install init/read callbacks.

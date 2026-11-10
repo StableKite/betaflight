@@ -62,6 +62,7 @@
 #define BMM350_REG_PMU_CMD              0x06
 #define BMM350_REG_PMU_CMD_STATUS_0     0x07
 #define BMM350_REG_INT_CTRL             0x2E
+#define BMM350_REG_INT_STATUS           0x30
 #define BMM350_REG_MAG_X_XLSB           0x31
 #define BMM350_REG_OTP_CMD              0x50
 #define BMM350_REG_OTP_DATA_MSB         0x52
@@ -96,9 +97,6 @@
 #define BMM350_OTP_CROSS_Z_Y            0x16
 #define BMM350_OTP_MAG_DUT_T_0          0x18
 
-#define BMM350_SENS_CORR_Y              0.01f
-#define BMM350_TCS_CORR_Z               0.0001f
-
 #define BMM350_PMU_CMD_SUSPEND          0x00
 #define BMM350_PMU_CMD_NORMAL           0x01
 #define BMM350_PMU_CMD_UPD_OAE          0x02
@@ -106,7 +104,9 @@
 #define BMM350_PMU_CMD_BR               0x07
 
 #define BMM350_PMU_STATUS_BUSY          0x01
+#define BMM350_PMU_STATUS_OVERRIDDEN    0x06
 #define BMM350_PMU_STATUS_NORMAL        0x08
+#define BMM350_PMU_STATUS_ILLEGAL       0x10
 #define BMM350_PMU_STATUS_CMD_MASK      0xE0
 #define BMM350_PMU_STATUS_CMD_SHIFT     5
 
@@ -116,10 +116,12 @@
 #define BMM350_AXIS_EN_XYZ              0x07
 
 #define BMM350_INT_MODE_PULSED          (0 << 0)
+#define BMM350_INT_MODE_LATCHED         (1 << 0)
 #define BMM350_INT_POL_ACTIVE_HIGH      (1 << 1)
 #define BMM350_INT_OD_PUSHPULL          (1 << 2)
 #define BMM350_INT_OUTPUT_DISABLE       (0 << 3)
 #define BMM350_INT_DRDY_EN              (1 << 7)
+#define BMM350_INT_DRDY_STATUS          (1 << 2)
 
 #define BMM350_I2C_DUMMY_BYTES          2
 #define BMM350_MEAS_BYTES               12
@@ -180,6 +182,9 @@ static bool bmm350WaitPmuCmd(const extDevice_t *dev, uint8_t cmd, uint32_t timeo
         if (!bmm350ReadBytes(dev, BMM350_REG_PMU_CMD_STATUS_0, &status, 1)) {
             return false;
         }
+        if (status & BMM350_PMU_STATUS_ILLEGAL) {
+            return false;
+        }
 
         const uint8_t lastCmd = (status & BMM350_PMU_STATUS_CMD_MASK) >> BMM350_PMU_STATUS_CMD_SHIFT;
         if ((status & BMM350_PMU_STATUS_BUSY) == 0 && lastCmd == cmd) {
@@ -205,7 +210,9 @@ static bool bmm350SetPowerMode(const extDevice_t *dev, uint8_t mode)
         if (!busWriteRegister(dev, BMM350_REG_PMU_CMD, BMM350_PMU_CMD_SUSPEND)) {
             return false;
         }
-        bmm350WaitPmuCmd(dev, BMM350_PMU_CMD_SUSPEND, 6);
+        if (!bmm350WaitPmuCmd(dev, BMM350_PMU_CMD_SUSPEND, 6)) {
+            return false;
+        }
     }
 
     if (!busWriteRegister(dev, BMM350_REG_PMU_CMD, mode)) {
@@ -277,7 +284,7 @@ static void bmm350ParseOtp(bmm350Comp_t *comp, const uint16_t *otpData)
     comp->offsetTemp = (float)((int8_t)otpData[BMM350_OTP_TEMP_OFF_SENS]) * (1.0f / 5.0f);
 
     comp->sensitX = (float)((int8_t)((otpData[BMM350_OTP_MAG_SENS_X] & 0xFF00) >> 8)) * (1.0f / 256.0f);
-    comp->sensitY = (float)((int8_t)otpData[BMM350_OTP_MAG_SENS_Y]) * (1.0f / 256.0f) + BMM350_SENS_CORR_Y;
+    comp->sensitY = (float)((int8_t)otpData[BMM350_OTP_MAG_SENS_Y]) * (1.0f / 256.0f);
     comp->sensitZ = (float)((int8_t)((otpData[BMM350_OTP_MAG_SENS_Z] & 0xFF00) >> 8)) * (1.0f / 256.0f);
     comp->sensitTemp = (float)((int8_t)((otpData[BMM350_OTP_TEMP_OFF_SENS] & 0xFF00) >> 8)) * (1.0f / 512.0f);
 
@@ -287,7 +294,7 @@ static void bmm350ParseOtp(bmm350Comp_t *comp, const uint16_t *otpData)
 
     comp->tcsX = (float)((int8_t)((otpData[BMM350_OTP_MAG_TCS_X] & 0xFF00) >> 8)) * (1.0f / 16384.0f);
     comp->tcsY = (float)((int8_t)((otpData[BMM350_OTP_MAG_TCS_Y] & 0xFF00) >> 8)) * (1.0f / 16384.0f);
-    comp->tcsZ = (float)((int8_t)((otpData[BMM350_OTP_MAG_TCS_Z] & 0xFF00) >> 8)) * (1.0f / 16384.0f) - BMM350_TCS_CORR_Z;
+    comp->tcsZ = (float)((int8_t)((otpData[BMM350_OTP_MAG_TCS_Z] & 0xFF00) >> 8)) * (1.0f / 16384.0f);
 
     comp->t0 = (float)((int16_t)otpData[BMM350_OTP_MAG_DUT_T_0]) * (1.0f / 512.0f) + 23.0f;
 
@@ -312,7 +319,9 @@ static bool bmm350MagReset(const extDevice_t *dev)
         if (!busWriteRegister(dev, BMM350_REG_PMU_CMD, BMM350_PMU_CMD_SUSPEND)) {
             return false;
         }
-        bmm350WaitPmuCmd(dev, BMM350_PMU_CMD_SUSPEND, 6);
+        if (!bmm350WaitPmuCmd(dev, BMM350_PMU_CMD_SUSPEND, 6)) {
+            return false;
+        }
     }
 
     if (!busWriteRegister(dev, BMM350_REG_PMU_CMD, BMM350_PMU_CMD_BR)
@@ -329,13 +338,12 @@ static bool bmm350MagReset(const extDevice_t *dev)
 }
 
 /**
- * @brief Assemble 3 register bytes into a sign-extended 21-bit integer.
+ * @brief Assemble three register bytes into a signed 24-bit value.
  */
-static int32_t bmm350Assemble21(const uint8_t *bytes)
+static int32_t bmm350Assemble24(const uint8_t *bytes)
 {
-    const uint32_t raw = ((uint32_t)bytes[0] << 8) | ((uint32_t)bytes[1] << 16) | ((uint32_t)bytes[2] << 24);
-
-    return (int32_t)raw >> 8;
+    const uint32_t raw = bytes[0] | ((uint32_t)bytes[1] << 8) | ((uint32_t)bytes[2] << 16);
+    return raw & 0x800000 ? (int32_t)raw - 0x1000000 : (int32_t)raw;
 }
 
 /**
@@ -389,9 +397,22 @@ static bool bmm350Probe(magDev_t *magDev)
 /**
  * @brief Soft-reset, load OTP, magnetic reset, 100 Hz normal mode.
  */
+static uint8_t bmm350Aggregation(bmm350Rate_e rate)
+{
+    return rate == BMM350_RATE_400_HZ ? BMM350_ODR_400HZ : (BMM350_AVERAGING_4 | BMM350_ODR_100HZ);
+}
+
 static bool bmm350Init(magDev_t *magDev)
 {
+    if (!magDev || !magDev->dev.bus || !magDev->dev.callbackArg) {
+        return false;
+    }
     extDevice_t *dev = &magDev->dev;
+    bmm350State_t *state = (bmm350State_t *)dev->callbackArg;
+    if (state->readInProgress) {
+        return false;
+    }
+    state->pollingReady = false;
     bool identified = false;
 
     busDeviceRegister(dev);
@@ -413,14 +434,15 @@ static bool bmm350Init(magDev_t *magDev)
         return false;
     }
 
-    bmm350State_t *state = (bmm350State_t *)dev->callbackArg;
     uint16_t otpData[BMM350_OTP_DATA_LENGTH];
     memset(&state->comp, 0, sizeof(state->comp));
     state->trimValid = bmm350ReadOtp(dev, otpData);
     if (state->trimValid) {
         bmm350ParseOtp(&state->comp, otpData);
     }
-    busWriteRegister(dev, BMM350_REG_OTP_CMD, BMM350_OTP_CMD_PWR_OFF_OTP);
+    if (!busWriteRegister(dev, BMM350_REG_OTP_CMD, BMM350_OTP_CMD_PWR_OFF_OTP)) {
+        return false;
+    }
 
     // BR/FGR needs the 2.2 uF CRST capacitor. Still enter normal mode if reset times out.
     state->magneticResetComplete = bmm350MagReset(dev);
@@ -431,15 +453,16 @@ static bool bmm350Init(magDev_t *magDev)
         return false;
     }
 
-    const uint8_t aggregation = state->rate == BMM350_RATE_400_HZ
-        ? BMM350_ODR_400HZ : (BMM350_AVERAGING_4 | BMM350_ODR_100HZ);
+    const uint8_t aggregation = bmm350Aggregation(state->rate);
     if (!busWriteRegister(dev, BMM350_REG_PMU_CMD_AGGR_SET, aggregation)) {
         return false;
     }
     if (!busWriteRegister(dev, BMM350_REG_PMU_CMD, BMM350_PMU_CMD_UPD_OAE)) {
         return false;
     }
-    bmm350WaitPmuCmd(dev, BMM350_PMU_CMD_UPD_OAE, 20);
+    if (!bmm350WaitPmuCmd(dev, BMM350_PMU_CMD_UPD_OAE, 20)) {
+        return false;
+    }
 
     if (!busWriteRegister(dev, BMM350_REG_PMU_CMD_AXIS_EN, BMM350_AXIS_EN_XYZ)) {
         return false;
@@ -459,45 +482,70 @@ static bool bmm350Init(magDev_t *magDev)
  * Does not wait for INT_STATUS DRDY; that bit is unreliable on some silicon
  * while the data registers are still valid.
  */
-bool bmm350ReadSample(magDev_t *magDev, float magnetic[3], float *temperature)
+static bmm350ReadResult_e bmm350ReadSampleCore(magDev_t *magDev, float magnetic[3], float *temperature,
+    bool completeImmediately)
 {
+    if (!magDev || !magDev->dev.bus) {
+        return BMM350_SAMPLE_ERROR;
+    }
     extDevice_t *dev = &magDev->dev;
     bmm350State_t *state = (bmm350State_t *)dev->callbackArg;
     if (!state || !magnetic || !temperature) {
-        return false;
+        return BMM350_SAMPLE_ERROR;
     }
     STATIC_ASSERT(sizeof(state->receiveBuffer) == BMM350_I2C_DUMMY_BYTES + BMM350_MEAS_BYTES, bmm350_receive_buffer_size);
 
     if (!state->readInProgress) {
-        state->readInProgress = busReadRegisterBufferStart(
-            dev, BMM350_REG_MAG_X_XLSB, state->receiveBuffer, sizeof(state->receiveBuffer));
-        return false;
+        if (!busReadRegisterBufferStart(dev, BMM350_REG_MAG_X_XLSB,
+            state->receiveBuffer, sizeof(state->receiveBuffer))) {
+            return BMM350_SAMPLE_ERROR;
+        }
+        state->readInProgress = true;
+        if (!completeImmediately) {
+            return BMM350_SAMPLE_PENDING;
+        }
     }
 
     bool error = false;
     if (busBusy(dev, &error)) {
-        return false;
+        return BMM350_SAMPLE_PENDING;
     }
     state->readInProgress = false;
     if (error) {
-        return false;
+        return BMM350_SAMPLE_ERROR;
     }
 
     const uint8_t *data = &state->receiveBuffer[BMM350_I2C_DUMMY_BYTES];
-    bmm350Compensate(&state->comp, bmm350Assemble21(&data[0]), bmm350Assemble21(&data[3]),
-                    bmm350Assemble21(&data[6]), bmm350Assemble21(&data[9]), magnetic, temperature);
-    return true;
+    float values[3], temp;
+    bmm350Compensate(&state->comp, bmm350Assemble24(&data[0]), bmm350Assemble24(&data[3]),
+        bmm350Assemble24(&data[6]), bmm350Assemble24(&data[9]), values, &temp);
+    if (!isfinite(values[0]) || !isfinite(values[1]) || !isfinite(values[2]) || !isfinite(temp)) {
+        return BMM350_SAMPLE_ERROR;
+    }
+    memcpy(magnetic, values, sizeof(values));
+    *temperature = temp;
+    return BMM350_SAMPLE_READY;
+}
+
+bool bmm350ReadSample(magDev_t *magDev, float magnetic[3], float *temperature)
+{
+    return bmm350ReadSampleCore(magDev, magnetic, temperature, false) == BMM350_SAMPLE_READY;
 }
 
 static bool bmm350Read(magDev_t *magDev, int16_t *magData)
 {
+    if (!magData) {
+        return false;
+    }
     float magnetic[3], temperature;
     if (!bmm350ReadSample(magDev, magnetic, &temperature)) {
         return false;
     }
 
     for (unsigned axis = 0; axis < XYZ_AXIS_COUNT; ++axis) {
-        magData[axis] = (int16_t)constrain(lrintf(magnetic[axis] * BMM350_UT_TO_MILLIGAUSS), INT16_MIN, INT16_MAX);
+        const float milligauss = constrainf(magnetic[axis] * BMM350_UT_TO_MILLIGAUSS,
+            (float)INT16_MIN, (float)INT16_MAX);
+        magData[axis] = (int16_t)lrintf(milligauss);
     }
     return true;
 }
@@ -507,11 +555,15 @@ static bool bmm350Read(magDev_t *magDev, int16_t *magData)
  */
 bool bmm350DetectWithState(magDev_t *magDev, bmm350State_t *state, bmm350Rate_e rate)
 {
-    if (!state || (rate != BMM350_RATE_100_HZ && rate != BMM350_RATE_400_HZ)) {
+    if (!magDev || !magDev->dev.bus || !state ||
+        (rate != BMM350_RATE_100_HZ && rate != BMM350_RATE_400_HZ)) {
         return false;
     }
     extDevice_t *dev = &magDev->dev;
     if (dev->bus->busType != BUS_TYPE_I2C) {
+        return false;
+    }
+    if (dev->callbackArg == (uintptr_t)state && state->readInProgress) {
         return false;
     }
 
@@ -546,6 +598,54 @@ bool bmm350DetectWithState(magDev_t *magDev, bmm350State_t *state, bmm350Rate_e 
 bool bmm350Detect(magDev_t *magDev)
 {
     return bmm350DetectWithState(magDev, &defaultState, BMM350_RATE_100_HZ);
+}
+
+bool bmm350InitForPolling(magDev_t *magDev, bmm350State_t *state, bmm350Rate_e rate)
+{
+    if (!bmm350DetectWithState(magDev, state, rate) || !bmm350Init(magDev) ||
+        !state->trimValid || !state->magneticResetComplete) {
+        return false;
+    }
+    uint8_t status, aggregation, axes, interrupt;
+    const uint8_t statusMask = BMM350_PMU_STATUS_BUSY | BMM350_PMU_STATUS_OVERRIDDEN |
+        BMM350_PMU_STATUS_NORMAL | BMM350_PMU_STATUS_ILLEGAL;
+    if (!bmm350ReadBytes(&magDev->dev, BMM350_REG_PMU_CMD_STATUS_0, &status, 1) ||
+        (status & statusMask) != BMM350_PMU_STATUS_NORMAL ||
+        !bmm350ReadBytes(&magDev->dev, BMM350_REG_PMU_CMD_AGGR_SET, &aggregation, 1) ||
+        (aggregation & 0x3f) != bmm350Aggregation(rate) ||
+        !bmm350ReadBytes(&magDev->dev, BMM350_REG_PMU_CMD_AXIS_EN, &axes, 1) ||
+        (axes & BMM350_AXIS_EN_XYZ) != BMM350_AXIS_EN_XYZ ||
+        !bmm350ReadBytes(&magDev->dev, BMM350_REG_INT_CTRL, &interrupt, 1)) {
+        return false;
+    }
+    const uint8_t latched = interrupt | BMM350_INT_MODE_LATCHED;
+    if (!busWriteRegister(&magDev->dev, BMM350_REG_INT_CTRL, latched) ||
+        !bmm350ReadBytes(&magDev->dev, BMM350_REG_INT_CTRL, &interrupt, 1) || interrupt != latched) {
+        return false;
+    }
+    state->pollingReady = true;
+    return true;
+}
+
+bmm350ReadResult_e bmm350PollSample(magDev_t *magDev, float magnetic[3], float *temperature)
+{
+    if (!magDev || !magDev->dev.bus || !magnetic || !temperature) {
+        return BMM350_SAMPLE_ERROR;
+    }
+    bmm350State_t *state = (bmm350State_t *)magDev->dev.callbackArg;
+    if (!state || !state->pollingReady) {
+        return BMM350_SAMPLE_ERROR;
+    }
+    if (!state->readInProgress) {
+        uint8_t status;
+        if (!bmm350ReadBytes(&magDev->dev, BMM350_REG_INT_STATUS, &status, 1)) {
+            return BMM350_SAMPLE_ERROR;
+        }
+        if (!(status & BMM350_INT_DRDY_STATUS)) {
+            return BMM350_SAMPLE_PENDING;
+        }
+    }
+    return bmm350ReadSampleCore(magDev, magnetic, temperature, true);
 }
 
 #endif // USE_MAG_BMM350
