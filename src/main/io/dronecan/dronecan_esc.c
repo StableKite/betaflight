@@ -201,9 +201,13 @@ static void handleEscStatus(CanardInstance *ins, CanardRxTransfer *t)
     data.voltage     = (uint16_t)constrainf(finiteOrZero(status.voltage) * 100.0f, 0, UINT16_MAX);   // 0.01V
     data.current     = (int32_t)(finiteOrZero(status.current) * 100.0f);                            // 0.01A
     data.temperature = (uint8_t)constrainf(tempC, 0, UINT8_MAX);                      // °C
-    // Status.rpm is electrical RPM; escSensorData.rpm is eRPM/100 (LSB = 100),
-    // matching the DShot telemetry convention so erpmToRpm() agrees downstream.
-    data.rpm         = (int16_t)constrainf(status.rpm / 100.0f, INT16_MIN, INT16_MAX);
+    // Status reports shaft RPM. Native ESC consumers use unsigned rotation
+    // frequency in eRPM/100; retain direction in escSamples, and convert the
+    // magnitude using the configured pole count. Bound the existing store.
+    const int64_t shaftRpm = status.rpm;
+    const uint64_t rpmMagnitude = shaftRpm < 0 ? -shaftRpm : shaftRpm;
+    const uint64_t erpm100 = rpmMagnitude * motorConfig()->motorPoleCount / 200U;
+    data.rpm = (int16_t)MIN(erpm100, (uint64_t)INT16_MAX);
     // consumption (mAh) isn't carried by esc.Status; leave 0 (battery falls
     // back to its own coulomb counter).
 
