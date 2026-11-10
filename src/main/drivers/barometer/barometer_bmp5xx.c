@@ -143,29 +143,29 @@
 #define BMP5XX_ODR_0_125_HZ         (0x1F << 2)
 
 // OSR_CONFIG register bitfields
-#define BMP5XX_OSR_PRESS_1X         (0x00)
-#define BMP5XX_OSR_PRESS_2X         (0x01)
-#define BMP5XX_OSR_PRESS_4X         (0x02)
-#define BMP5XX_OSR_PRESS_8X         (0x03)
-#define BMP5XX_OSR_PRESS_16X        (0x04)
-#define BMP5XX_OSR_PRESS_32X        (0x05)
-#define BMP5XX_OSR_PRESS_64X        (0x06)
-#define BMP5XX_OSR_PRESS_128X       (0x07)
+#define BMP5XX_OSR_PRESS_1X         (0x00 << 3)
+#define BMP5XX_OSR_PRESS_2X         (0x01 << 3)
+#define BMP5XX_OSR_PRESS_4X         (0x02 << 3)
+#define BMP5XX_OSR_PRESS_8X         (0x03 << 3)
+#define BMP5XX_OSR_PRESS_16X        (0x04 << 3)
+#define BMP5XX_OSR_PRESS_32X        (0x05 << 3)
+#define BMP5XX_OSR_PRESS_64X        (0x06 << 3)
+#define BMP5XX_OSR_PRESS_128X       (0x07 << 3)
 
-#define BMP5XX_OSR_TEMP_1X          (0x00 << 3)
-#define BMP5XX_OSR_TEMP_2X          (0x01 << 3)
-#define BMP5XX_OSR_TEMP_4X          (0x02 << 3)
-#define BMP5XX_OSR_TEMP_8X          (0x03 << 3)
-#define BMP5XX_OSR_TEMP_16X         (0x04 << 3)
-#define BMP5XX_OSR_TEMP_32X         (0x05 << 3)
-#define BMP5XX_OSR_TEMP_64X         (0x06 << 3)
-#define BMP5XX_OSR_TEMP_128X        (0x07 << 3)
+#define BMP5XX_OSR_TEMP_1X          (0x00)
+#define BMP5XX_OSR_TEMP_2X          (0x01)
+#define BMP5XX_OSR_TEMP_4X          (0x02)
+#define BMP5XX_OSR_TEMP_8X          (0x03)
+#define BMP5XX_OSR_TEMP_16X         (0x04)
+#define BMP5XX_OSR_TEMP_32X         (0x05)
+#define BMP5XX_OSR_TEMP_64X         (0x06)
+#define BMP5XX_OSR_TEMP_128X        (0x07)
 
 #define BMP5XX_OSR_PRESS_EN         (0x01 << 6)
 
 // DSP_CONFIG register bitfields
 #define BMP5XX_DSP_COMP_PRESS_TEMP  (0x03)  // Enable pressure and temperature compensation
-#define BMP5XX_DSP_SHDW_SEL_IIR     (0x01 << 3)  // IIR output to shadow registers
+#define BMP5XX_DSP_SHDW_SEL_IIR     ((0x01 << 3) | (0x01 << 5))  // Temperature and pressure IIR shadow outputs
 
 // DSP_IIR register bitfields (IIR filter coefficient selection)
 // Coefficients: 0=bypass, 1=1, 2=3, 3=7, 4=15, 5=31, 6=63, 7=127
@@ -178,9 +178,9 @@
 #define BMP5XX_IIR_COEF_63          (0x06)
 #define BMP5XX_IIR_COEF_127         (0x07)
 
-// IIR coefficient for pressure (bits 2:0) and temperature (bits 5:3)
-#define BMP5XX_IIR_PRESS(x)         ((x) & 0x07)
-#define BMP5XX_IIR_TEMP(x)          (((x) & 0x07) << 3)
+// IIR coefficient for pressure (bits 5:3) and temperature (bits 2:0)
+#define BMP5XX_IIR_PRESS(x)         (((x) & 0x07) << 3)
+#define BMP5XX_IIR_TEMP(x)          ((x) & 0x07)
 
 // INT_CONFIG register bitfields
 #define BMP5XX_INT_MODE_PULSED      (0x00)
@@ -456,7 +456,7 @@ bool bmp5xxDetect(const bmp5xxConfig_t *config, baroDev_t *baro, uint8_t *detect
     // Invalid ODR/OSR combinations silently use fallback oversampling. Verify
     // the effective pressure/temperature profile as well as odr_is_valid.
     uint8_t effectiveOsr;
-    const uint8_t expectedOsr = 0x80 | (BMP5XX_PRESSURE_OSR << 3) | (BMP5XX_TEMPERATURE_OSR >> 3);
+    const uint8_t expectedOsr = 0x80 | BMP5XX_PRESSURE_OSR | BMP5XX_TEMPERATURE_OSR;
     if (!bmp5xxReadRegisterBuffer(dev, BMP5XX_REG_OSR_EFF, &effectiveOsr, 1) ||
         (effectiveOsr & 0xbf) != expectedOsr) {
         goto failure;

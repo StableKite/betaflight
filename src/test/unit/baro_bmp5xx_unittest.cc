@@ -28,6 +28,7 @@ struct RegisterBus {
     uint8_t failedWrite = 0xff;
     uint8_t failedRead = 0xff;
     uint8_t i2cAddress = 0;
+    int effectiveOsrOverride = -1;
     unsigned selectReads = 0;
     unsigned resetWrites = 0;
     unsigned sampleReads = 0;
@@ -46,7 +47,6 @@ protected:
         mock.registers[0x01] = {0x50};
         mock.registers[0x28] = {0x02};
         mock.registers[0x27] = {0x10};
-        mock.registers[0x38] = {0xa2}; // Valid: pressure 16x, temperature 4x.
         mock.registers[0x1d] = {0, 0, 24, 0, 0xa8, 0x61};
         bus.busType = BUS_TYPE_I2C;
         baro.dev.bus = &bus;
@@ -144,13 +144,23 @@ TEST_F(Bmp5xxTest, ProgramsAValid50HzOversamplingProfile)
     ASSERT_TRUE(bmp5xxDetect(&config, &baro, nullptr));
     // Datasheet table 7: pressure 16x / temperature 4x supports up to 80 Hz;
     // pressure 128x supports only 10 Hz and silently falls back at 50 Hz.
-    EXPECT_EQ((std::vector<uint8_t>{0x54}), mock.registers[0x36]);
+    EXPECT_EQ((std::vector<uint8_t>{0x62}), mock.registers[0x36]);
     EXPECT_EQ((std::vector<uint8_t>{0x3d}), mock.registers[0x37]);
+}
+
+TEST_F(Bmp5xxTest, SelectsFilteredPressureAndTemperatureInTheShadowRegisters)
+{
+    const bool detected = bmp5xxDetect(&config, &baro, nullptr);
+
+    // Datasheet section 7.27: compensation[1:0], temperature IIR[3], pressure IIR[5].
+    EXPECT_EQ((std::vector<uint8_t>{0x2b}), mock.registers[0x30]);
+    EXPECT_EQ((std::vector<uint8_t>{0x24}), mock.registers[0x31]);
+    EXPECT_TRUE(detected);
 }
 
 TEST_F(Bmp5xxTest, RejectsAnInvalidEffectiveOversamplingProfile)
 {
-    mock.registers[0x38] = {0x09}; // Invalid ODR with automatic 2x fallback.
+    mock.effectiveOsrOverride = 0x09; // Invalid ODR with automatic 2x fallback.
     EXPECT_FALSE(bmp5xxDetect(&config, &baro, nullptr));
 }
 
@@ -211,6 +221,16 @@ bool busReadRegisterBuffer(const extDevice_t *dev, uint8_t reg, uint8_t *data, u
         ++mock.selectReads;
         memset(data, 0, length);
         return true;
+    }
+    if (reg == 0x38) {
+        // OSR_CONFIG and OSR_EFF use the same P[5:3] / T[2:0] layout.
+        // Derive the readback from the actual wire write, not driver constants
+        // or a pre-seeded "correct" response. Validity is independently injectable.
+        const auto osr = mock.registers.find(0x36);
+        const uint8_t configured = osr == mock.registers.end() ? 0 : osr->second[0];
+        const uint8_t effective = mock.effectiveOsrOverride >= 0 ?
+            static_cast<uint8_t>(mock.effectiveOsrOverride) : static_cast<uint8_t>(0x80 | (configured & 0x3f));
+        mock.registers[reg] = {effective};
     }
     const auto found = mock.registers.find(reg);
     const unsigned dummy = dev->bus->busType == BUS_TYPE_SPI ? 1 : 0;
