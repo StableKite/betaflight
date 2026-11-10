@@ -1305,7 +1305,7 @@ case MSP_NAME:
                 }
                 escTemperature = escData->temperature;
                 escVoltage = escData->voltage;
-                escCurrent = escData->current;
+                escCurrent = constrain(escData->current, 0, UINT16_MAX);
                 escConsumption = escData->consumption;
             }
 #endif
