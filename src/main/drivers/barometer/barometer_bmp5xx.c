@@ -210,10 +210,9 @@
 #define BMP5XX_INT_STATUS_POR       (0x01 << 4)
 
 // Oversampling settings for measurement
-// Pressure: 128X = maximum oversampling, lowest noise
-// Temperature: 4X = balanced (temperature changes slowly)
-// This combination gives ~10Hz update rate
-#define BMP5XX_PRESSURE_OSR         BMP5XX_OSR_PRESS_128X
+// Pressure 16X / temperature 4X supports the configured 50 Hz ODR.
+// 128X pressure at 50 Hz is invalid and silently falls back to 2X on BMP581.
+#define BMP5XX_PRESSURE_OSR         BMP5XX_OSR_PRESS_16X
 #define BMP5XX_TEMPERATURE_OSR      BMP5XX_OSR_TEMP_4X
 
 // Data frame size: temperature (3 bytes) + pressure (3 bytes)
@@ -331,7 +330,7 @@ static bool bmp5xxBeginForcedMeasurement(const extDevice_t *dev)
  * @param baro Pointer to barometer device structure to initialize
  * @param detectedChip Pointer to store detected chip ID (0x50=BMP580, 0x51=BMP581), or NULL if not needed
  * @return true if BMP580/BMP581 detected and initialized, false otherwise
- * @note Configures sensor for Normal mode at 50Hz ODR with 128x pressure OSR,
+ * @note Configures sensor for Normal mode at 50Hz ODR with 16x pressure OSR,
  *       4x temperature OSR, and IIR filter coefficient 15
  */
 bool bmp5xxDetect(const bmp5xxConfig_t *config, baroDev_t *baro, uint8_t *detectedChip)
@@ -454,6 +453,14 @@ bool bmp5xxDetect(const bmp5xxConfig_t *config, baroDev_t *baro, uint8_t *detect
     if (!busWriteRegister(dev, BMP5XX_REG_ODR_CONFIG, odrConfig)) {
         goto failure;
     }
+    // Invalid ODR/OSR combinations silently use fallback oversampling. Verify
+    // the effective pressure/temperature profile as well as odr_is_valid.
+    uint8_t effectiveOsr;
+    const uint8_t expectedOsr = 0x80 | (BMP5XX_PRESSURE_OSR << 3) | (BMP5XX_TEMPERATURE_OSR >> 3);
+    if (!bmp5xxReadRegisterBuffer(dev, BMP5XX_REG_OSR_EFF, &effectiveOsr, 1) ||
+        (effectiveOsr & 0xbf) != expectedOsr) {
+        goto failure;
+    }
 
     // Set up baro device callbacks
     // Temperature and pressure are read together, so UT callbacks are dummy
@@ -472,12 +479,9 @@ bool bmp5xxDetect(const bmp5xxConfig_t *config, baroDev_t *baro, uint8_t *detect
     baro->combined_read = true;
 
     // Measurement delay for polling mode
-    // With 128× pressure OSR and 4× temperature OSR, the datasheet specifies
-    // ~98ms single-shot conversion time. However, we use Normal mode (continuous)
-    // at 50Hz ODR, so fresh data is available in shadow registers without waiting
-    // for conversion. The 15ms delay is a safety margin for I2C read timing,
-    // not the actual conversion time.
-    baro->up_delay = 15000;  // 15ms - sufficient for Normal mode shadow register reads
+    // Poll before the next nominal 20ms measurement boundary. ReadUP checks
+    // DRDY, so a successful bus read alone cannot replay an older sample.
+    baro->up_delay = 15000;
 
     baro->calculate = bmp5xxCalculate;
 

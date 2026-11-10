@@ -46,6 +46,7 @@ protected:
         mock.registers[0x01] = {0x50};
         mock.registers[0x28] = {0x02};
         mock.registers[0x27] = {0x10};
+        mock.registers[0x38] = {0xa2}; // Valid: pressure 16x, temperature 4x.
         mock.registers[0x1d] = {0, 0, 24, 0, 0xa8, 0x61};
         bus.busType = BUS_TYPE_I2C;
         baro.dev.bus = &bus;
@@ -135,6 +136,21 @@ TEST_F(Bmp5xxTest, RejectsNvmErrorAfterReset)
 TEST_F(Bmp5xxTest, RejectsFailedConfigurationWrite)
 {
     mock.failedWrite = 0x36;
+    EXPECT_FALSE(bmp5xxDetect(&config, &baro, nullptr));
+}
+
+TEST_F(Bmp5xxTest, ProgramsAValid50HzOversamplingProfile)
+{
+    ASSERT_TRUE(bmp5xxDetect(&config, &baro, nullptr));
+    // Datasheet table 7: pressure 16x / temperature 4x supports up to 80 Hz;
+    // pressure 128x supports only 10 Hz and silently falls back at 50 Hz.
+    EXPECT_EQ((std::vector<uint8_t>{0x54}), mock.registers[0x36]);
+    EXPECT_EQ((std::vector<uint8_t>{0x3d}), mock.registers[0x37]);
+}
+
+TEST_F(Bmp5xxTest, RejectsAnInvalidEffectiveOversamplingProfile)
+{
+    mock.registers[0x38] = {0x09}; // Invalid ODR with automatic 2x fallback.
     EXPECT_FALSE(bmp5xxDetect(&config, &baro, nullptr));
 }
 
