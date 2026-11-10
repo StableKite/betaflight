@@ -4,6 +4,10 @@
  */
 #include <string.h>
 
+#include "platform.h"
+
+#ifdef USE_ACCGYRO_ICM45686
+
 #include "accgyro_icm45686.h"
 #include "accgyro_icm456xx_registers.h"
 
@@ -32,12 +36,12 @@ enum {
 
 static bool readReg(const icm45686Io_t *io, uint8_t reg, uint8_t *data, size_t count)
 {
-    return io->read && io->read(io->context, reg, data, count);
+    return io && io->read && io->read(io->context, reg, data, count) > 0;
 }
 
 static bool writeRegs(const icm45686Io_t *io, uint8_t reg, const uint8_t *data, size_t count)
 {
-    return io->write && io->write(io->context, reg, data, count);
+    return io && io->write && io->write(io->context, reg, data, count) > 0;
 }
 
 static bool writeReg(const icm45686Io_t *io, uint8_t reg, uint8_t value)
@@ -45,19 +49,46 @@ static bool writeReg(const icm45686Io_t *io, uint8_t reg, uint8_t value)
     return writeRegs(io, reg, &value, 1);
 }
 
+static bool waitIndirectReady(const icm45686Io_t *io)
+{
+    const uint64_t started = io->clockNs();
+    for (unsigned waitedUs = 0; waitedUs < 5000; waitedUs += 4) {
+        uint8_t status;
+        if (!readReg(io, ICM456XX_REG_MISC2, &status, 1)) {
+            return false;
+        }
+        if (status & 1) {
+            return true;
+        }
+        io->delayUs(4);
+        if (io->clockNs() - started >= UINT64_C(5000000)) {
+            break;
+        }
+    }
+    return false;
+}
+
 static bool readIndirect(const icm45686Io_t *io, uint16_t reg, uint8_t *value)
 {
+    if (!waitIndirectReady(io)) {
+        return false;
+    }
     const uint8_t address[] = {reg >> 8, reg};
     io->delayUs(4);
     if (!writeRegs(io, ICM456XX_REG_IREG_ADDR_15_8, address, sizeof(address))) {
         return false;
     }
     io->delayUs(4);
-    return readReg(io, ICM456XX_REG_IREG_DATA, value, 1);
+    const bool ok = readReg(io, ICM456XX_REG_IREG_DATA, value, 1);
+    io->delayUs(4);
+    return ok;
 }
 
 static bool writeIndirect(const icm45686Io_t *io, uint16_t reg, uint8_t value)
 {
+    if (!waitIndirectReady(io)) {
+        return false;
+    }
     const uint8_t data[] = {reg >> 8, reg, value};
     io->delayUs(4);
     const bool ok = writeRegs(io, ICM456XX_REG_IREG_ADDR_15_8, data, sizeof(data));
@@ -67,6 +98,9 @@ static bool writeIndirect(const icm45686Io_t *io, uint16_t reg, uint8_t value)
 
 bool icm45686InitDirect(const icm45686Io_t *io, bool retryIdentification)
 {
+    if (!io || !io->read || !io->write || !io->delayUs) {
+        return false;
+    }
     uint8_t id;
     if (!readReg(io, ICM456XX_WHO_AM_REGISTER, &id, 1)) {
         if (!retryIdentification) {
@@ -95,6 +129,9 @@ bool icm45686InitDirect(const icm45686Io_t *io, bool retryIdentification)
 
 icm45686Result_e icm45686ReadDirect(const icm45686Io_t *io, icm45686DirectSample_t *sample)
 {
+    if (!io || !io->read || !sample) {
+        return ICM45686_INVALID;
+    }
     uint8_t status;
     if (!readReg(io, ICM456XX_INT1_STATUS0, &status, 1)) {
         return ICM45686_TRANSPORT;
@@ -120,7 +157,7 @@ static bool flushFifo(const icm45686Io_t *io, uint8_t config3)
         return false;
     }
     const uint64_t started = io->clockNs();
-    do {
+    for (unsigned attempt = 0; attempt < 1000; ++attempt) {
         uint8_t value;
         if (!readReg(io, FIFO_CONFIG3, &value, 1)) {
             return false;
@@ -129,12 +166,18 @@ static bool flushFifo(const icm45686Io_t *io, uint8_t config3)
             return true;
         }
         io->delayUs(100);
-    } while (io->clockNs() - started < 100000000);
+        if (io->clockNs() - started >= 100000000) {
+            break;
+        }
+    }
     return false;
 }
 
 icm45686Result_e icm45686FifoStop(const icm45686Io_t *io, icm45686FifoDevice_t *device)
 {
+    if (!io || !io->read || !io->write || !io->delayUs || !io->clockNs || !device) {
+        return ICM45686_INVALID;
+    }
     device->active = false;
     if (!device->saved) {
         return ICM45686_CLOSED;
@@ -162,6 +205,9 @@ icm45686Result_e icm45686FifoStop(const icm45686Io_t *io, icm45686FifoDevice_t *
 
 icm45686Result_e icm45686FifoStart(const icm45686Io_t *io, icm45686FifoDevice_t *device)
 {
+    if (!io || !io->read || !io->write || !io->delayUs || !io->clockNs || !device) {
+        return ICM45686_INVALID;
+    }
     if (device->saved || device->active) {
         return ICM45686_INVALID;
     }
@@ -234,8 +280,12 @@ static icm45686Result_e fifoStatus(const icm45686Io_t *io)
     return (status & ICM456XX_INT1_STATUS_RESET_DONE) ? ICM45686_CONFIGURATION : ICM45686_READY;
 }
 
-icm45686Result_e icm45686FifoFetch(const icm45686Io_t *io, const icm45686FifoDevice_t *device, icm45686FifoRead_t *readout)
+icm45686Result_e icm45686FifoFetch(const icm45686Io_t *io, const icm45686FifoDevice_t *device,
+    icm45686FifoRead_t *readout)
 {
+    if (!io || !io->read || !io->clockNs || !device || !readout) {
+        return ICM45686_INVALID;
+    }
     readout->count = 0;
     readout->available = 0;
     if (!device->active) {
@@ -278,7 +328,7 @@ icm45686Result_e icm45686FifoFetch(const icm45686Io_t *io, const icm45686FifoDev
 icm45686Result_e icm45686FifoDecode(const uint8_t *data, size_t count, bool bigEndian,
     icm45686FifoTimeline_t *timeline, icm45686FifoFrame_t frames[ICM45686_FIFO_BATCH_CAPACITY])
 {
-    if (!data || !count || count > ICM45686_FIFO_BATCH_CAPACITY) {
+    if (!data || !count || count > ICM45686_FIFO_BATCH_CAPACITY || !timeline || !frames) {
         return ICM45686_INVALID;
     }
     icm45686FifoTimeline_t next = *timeline;
@@ -320,3 +370,84 @@ icm45686Result_e icm45686FifoDecode(const uint8_t *data, size_t count, bool bigE
     memcpy(frames, batch, count * sizeof(*frames));
     return ICM45686_READY;
 }
+
+icm45686Result_e icm45686FifoStreamStart(const icm45686Io_t *io, icm45686FifoStream_t *stream)
+{
+    if (!stream || stream->device.saved || stream->device.active) {
+        return ICM45686_INVALID;
+    }
+    memset(stream, 0, sizeof(*stream));
+    stream->fault = icm45686FifoStart(io, &stream->device);
+    if (stream->fault == ICM45686_READY) {
+        stream->lastReadNs = io->clockNs();
+        stream->lastFrameNs = stream->lastReadNs;
+    }
+    return stream->fault;
+}
+
+icm45686Result_e icm45686FifoStreamStop(const icm45686Io_t *io, icm45686FifoStream_t *stream)
+{
+    if (!stream) {
+        return ICM45686_INVALID;
+    }
+    const icm45686Result_e result = icm45686FifoStop(io, &stream->device);
+    if (result == ICM45686_RESTORE || result == ICM45686_CLOSED) {
+        stream->fault = result;
+    }
+    return result;
+}
+
+static bool streamGapTooLong(uint64_t now, uint64_t previous)
+{
+    // A long host pause makes the wrapping 16-bit device timestamp ambiguous.
+    return now < previous || now - previous >= UINT64_C(50000000);
+}
+
+static icm45686Result_e streamFault(icm45686FifoStream_t *stream, icm45686Result_e fault,
+    icm45686FifoRead_t *readout)
+{
+    readout->count = 0;
+    stream->fault = fault;
+    return fault;
+}
+
+icm45686Result_e icm45686FifoStreamRead(const icm45686Io_t *io, icm45686FifoStream_t *stream,
+    icm45686FifoFrame_t frames[ICM45686_FIFO_BATCH_CAPACITY], icm45686FifoRead_t *readout)
+{
+    if (!io || !io->read || !io->clockNs || !stream || !frames || !readout) {
+        return ICM45686_INVALID;
+    }
+    memset(readout, 0, sizeof(*readout));
+    if (!stream->device.active) {
+        return ICM45686_CLOSED;
+    }
+    if (stream->fault != ICM45686_READY) {
+        return stream->fault;
+    }
+    readout->readBeginNs = io->clockNs();
+    if (streamGapTooLong(readout->readBeginNs, stream->lastReadNs) ||
+        streamGapTooLong(readout->readBeginNs, stream->lastFrameNs)) {
+        return streamFault(stream, ICM45686_TIMELINE, readout);
+    }
+    const icm45686Result_e fetched = icm45686FifoFetch(io, &stream->device, readout);
+    if (fetched == ICM45686_PENDING) {
+        stream->lastReadNs = readout->readCompleteNs;
+        return fetched;
+    }
+    if (fetched != ICM45686_READY) {
+        return streamFault(stream, fetched, readout);
+    }
+    if (streamGapTooLong(io->clockNs(), stream->lastFrameNs)) {
+        return streamFault(stream, ICM45686_TIMELINE, readout);
+    }
+    const icm45686Result_e decoded = icm45686FifoDecode(readout->data, readout->count,
+        stream->device.bigEndian, &stream->timeline, frames);
+    if (decoded != ICM45686_READY) {
+        return streamFault(stream, decoded, readout);
+    }
+    stream->lastReadNs = io->clockNs();
+    stream->lastFrameNs = stream->lastReadNs;
+    return decoded;
+}
+
+#endif // USE_ACCGYRO_ICM45686

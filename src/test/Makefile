@@ -100,6 +100,11 @@ baro_bmp388_unittest_DEFINES := \
                 USE_BARO_BMP388= \
                 USE_BARO_SPI_BMP388=
 
+accgyro_icm45686_unittest_SRC := \
+		$(USER_DIR)/drivers/accgyro/accgyro_icm45686.c
+
+accgyro_icm45686_unittest_DEFINES := USE_ACCGYRO_ICM45686=
+
 baro_bmp5xx_detection_unittest_SRC := \
 		$(USER_DIR)/sensors/barometer.c
 

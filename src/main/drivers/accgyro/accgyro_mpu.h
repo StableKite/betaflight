@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "accgyro_icm456xx_registers.h"
+
 #include "drivers/accgyro/accgyro_icm456xx_registers.h"
 #include "drivers/bus.h"
 #include "drivers/exti.h"

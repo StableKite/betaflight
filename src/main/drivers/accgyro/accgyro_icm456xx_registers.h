@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define ICM45686_WHO_AM_I_CONST                 0xE9
+#define ICM45686_WHO_AM_I_CONST                 (0xE9)
 #define ICM456XX_WHO_AM_REGISTER                0x72
 #define ICM456XX_REG_MISC2                      0x7F
 #define ICM456XX_INT1_CONFIG0                   0x16
