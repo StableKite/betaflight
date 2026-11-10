@@ -257,7 +257,7 @@ void dronecanEscUpdate(timeUs_t currentTimeUs)
     // rather than a frozen last reading.
 #if defined(USE_ESC_SENSOR)
     for (uint8_t i = 0; i < MAX_SUPPORTED_MOTORS; i++) {
-        if (escStatusLastUs[i] != 0
+        if (escSamples[i].sequence
                 && cmpTimeUs(currentTimeUs, escStatusLastUs[i]) >= ESC_STATUS_AGE_INTERVAL_US) {
             escSensorExternalAge(i);
             escStatusLastUs[i] = currentTimeUs;
