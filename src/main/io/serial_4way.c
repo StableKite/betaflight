@@ -462,6 +462,13 @@ void esc4wayProcess(serialPort_t *mspPort)
 
         RX_LED_ON;
 
+        // A partial request can time out before these fields arrive.
+        CMD = 0;
+        ioMem.D_FLASH_ADDR_H = 0;
+        ioMem.D_FLASH_ADDR_L = 0;
+        I_PARAM_LEN = 0;
+        CRC_check.word = 0;
+
         Dummy.word = 0;
         O_PARAM = &Dummy.bytes[0];
         O_PARAM_LEN = 1;
