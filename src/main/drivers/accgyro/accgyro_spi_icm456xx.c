@@ -34,6 +34,7 @@
 
 #include "drivers/accgyro/accgyro.h"
 #include "drivers/accgyro/accgyro_icm456xx_registers.h"
+#include "drivers/accgyro/accgyro_icm456xx.h"
 #include "drivers/accgyro/accgyro_mpu.h"
 #include "drivers/accgyro/accgyro_spi_icm456xx.h"
 #include "drivers/bus_spi.h"
@@ -272,41 +273,14 @@ static uint8_t getGyroLpfConfig(const gyroHardwareLpf_e hardwareLpf)
     }
 }
 
-/**
- * @brief This function follows the IREG WRITE procedure (Section 14.1-14.4 of the datasheet)
- * using indirect addressing via IREG_ADDR_15_8, IREG_ADDR_7_0, and IREG_DATA registers.
- * After writing, an internal operation transfers the data to the target IREG address.
- * Ensures compliance with the required minimum time gap and checks the IREG_DONE bit.
- *
- * @param dev   Pointer to the SPI device structure.
- * @param reg   16-bit internal IREG register address.
- * @param value Value to be written to the register.
- * @return true if the write was successful
- */
+// The shared native core owns the complete bounded IREG transaction.
 static bool icm456xx_write_ireg(const extDevice_t *dev, uint16_t reg, uint8_t value)
 {
-    // IREG writes should not be performed while armed to avoid disrupting flight
     if (ARMING_FLAG(ARMED)) {
         return false;
     }
-
-    const uint8_t msb = (reg >> 8) & 0xFF;
-    const uint8_t lsb = reg & 0xFF;
-
-    spiWriteReg(dev, ICM456XX_REG_IREG_ADDR_15_8, msb);
-    spiWriteReg(dev, ICM456XX_REG_IREG_ADDR_7_0, lsb);
-    spiWriteReg(dev, ICM456XX_REG_IREG_DATA, value);
-
-    // Check IREG_DONE (bit 0 of REG_MISC2 = 0x7F) with elapsed-time tracking
-    for (uint32_t waited_us = 0; waited_us < ICM456XX_IREG_TIMEOUT_US; waited_us += 10) {
-        const uint8_t misc2 = spiReadRegMsk(dev, ICM456XX_REG_MISC2);
-        if (misc2 & ICM456XX_BIT_IREG_DONE) {
-            return true;
-        }
-        delayMicroseconds(10);
-    }
-
-    return false; // timeout
+    icm456xxDevice_t device = {.dev = dev};
+    return icm456xxWriteIndirect(&device, reg, value);
 }
 
 static bool icm456xx_enableAAFandInterpolator(const extDevice_t *dev, uint16_t reg, bool enableAAF, bool enableInterp)
@@ -437,22 +411,9 @@ uint8_t icm456xxSpiDetect(const extDevice_t *dev)
 {
     uint8_t icmDetected = MPU_NONE;
     uint8_t attemptsRemaining = 20;
-    uint32_t waited_us = 0;
-
-    // ICM-45686 does not use bank switching (register 0x75 is reserved)
-    // Perform soft reset directly
-
-    // Soft reset
-    spiWriteReg(dev, ICM456XX_REG_MISC2, ICM456XX_SOFT_RESET);
-
-    // Wait for reset to complete (bit 1 of REG_MISC2 becomes 0)
-    while ((spiReadRegMsk(dev, ICM456XX_REG_MISC2) & ICM456XX_SOFT_RESET) != 0) {
-        delayMicroseconds(10);
-        waited_us += 10;
-
-        if (waited_us >= ICM456XX_RESET_TIMEOUT_US) {
-            return MPU_NONE;
-        }
+    icm456xxDevice_t device = {.dev = dev};
+    if (!icm456xxReset(&device)) {
+        return MPU_NONE;
     }
 
     // Initialize power management to a known state after reset

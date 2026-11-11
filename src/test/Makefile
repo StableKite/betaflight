@@ -107,9 +107,9 @@ baro_bmp388_unittest_DEFINES := \
                 USE_BARO_SPI_BMP388=
 
 accgyro_icm45686_unittest_SRC := \
-		$(USER_DIR)/drivers/accgyro/accgyro_icm45686.c
+		$(USER_DIR)/drivers/accgyro/accgyro_icm456xx.c
 
-accgyro_icm45686_unittest_DEFINES := USE_ACCGYRO_ICM45686=
+accgyro_icm45686_unittest_DEFINES := USE_ACCGYRO_ICM45686= ENABLE_ICM45686_FIFO=1
 
 baro_bmp5xx_detection_unittest_SRC := \
 		$(USER_DIR)/sensors/barometer.c
@@ -924,3 +924,14 @@ endif
 
 $(foreach test,$(TESTS_ALL),$(if $($(basename $(test))_SRC),,$(error \
 	Test 'unit/$(basename $(test)).cc' has no '$(basename $(test))_SRC' variable defined)))
+
+bus_register_buffer_unittest_SRC := \
+        $(USER_DIR)/build/atomic.c \
+        $(USER_DIR)/drivers/bus.c \
+        $(USER_DIR)/drivers/bus_i2c_busdev.c \
+        $(USER_DIR)/drivers/bus_spi.c \
+        $(USER_DIR)/drivers/accgyro/accgyro_mpu.c
+
+bus_register_buffer_unittest_DEFINES := \
+        USE_I2C= USE_SPI= USE_SPI_DEVICE_1= USE_SPI_GYRO= \
+        SPI1=0x40013000UL SPIDEV_COUNT=1 MAX_SPI_PIN_SEL=1

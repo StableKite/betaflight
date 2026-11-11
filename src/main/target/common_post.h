@@ -951,3 +951,12 @@ extern struct linker_symbol __fontdata_end;
 #if !defined(ENABLE_UNUSED_PINS_INIT)
 #define ENABLE_UNUSED_PINS_INIT 1
 #endif
+
+// Buffered ICM45686 acquisition is optional. The normal gyro path is unchanged.
+#if !defined(ENABLE_ICM45686_FIFO)
+#define ENABLE_ICM45686_FIFO 0
+#endif
+#if ENABLE_ICM45686_FIFO && !defined(USE_ACCGYRO_ICM45686)
+#undef ENABLE_ICM45686_FIFO
+#define ENABLE_ICM45686_FIFO 0
+#endif
