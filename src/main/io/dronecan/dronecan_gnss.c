@@ -48,11 +48,12 @@
 #define FIX2_OFFSET_LONGITUDE_1E8   136U   // 37 bits signed
 #define FIX2_OFFSET_LATITUDE_1E8    173U   // 37 bits signed
 #define FIX2_OFFSET_HEIGHT_MSL_MM   237U   // 27 bits signed
-#define FIX2_OFFSET_VEL_N_F16       264U   // 16 bits float16
-#define FIX2_OFFSET_VEL_E_F16       280U   // 16 bits float16
-#define FIX2_OFFSET_VEL_D_F16       296U   // 16 bits float16
-#define FIX2_OFFSET_SATS_USED       312U   //  6 bits unsigned
-#define FIX2_OFFSET_STATUS          318U   //  2 bits unsigned
+#define FIX2_OFFSET_VEL_N           264U   // 32 bits float32
+#define FIX2_OFFSET_VEL_E           296U   // 32 bits float32
+#define FIX2_OFFSET_VEL_D           328U   // 32 bits float32
+#define FIX2_OFFSET_SATS_USED       360U   //  6 bits unsigned
+#define FIX2_OFFSET_STATUS          366U   //  2 bits unsigned
+#define FIX2_PREFIX_BYTES            46U   // Complete fields through status
 
 #define CM_PER_METRE                100
 
@@ -75,34 +76,60 @@ static volatile uint32_t latestSeq = 0;
 static volatile bool received = false;
 static volatile timeUs_t lastUpdateUs = 0;
 
+static bool decodeVelocity(const CanardRxTransfer *transfer, uint32_t offset, float *value)
+{
+    uint32_t bits;
+    if (canardDecodeScalar(transfer, offset, 32, false, &bits) != 32 ||
+        (bits & UINT32_C(0x7f800000)) == UINT32_C(0x7f800000)) {
+        return false;
+    }
+    // Check the IEEE-754 bits before float operations, including fast-math builds.
+    memcpy(value, &bits, sizeof(*value));
+    return true;
+}
+
+static int32_t metresToCentimetres(float value, int32_t minimum, int32_t maximum)
+{
+    if (value <= minimum / 100.0f) {
+        return minimum;
+    }
+    if (value >= maximum / 100.0f) {
+        return maximum;
+    }
+    return (int32_t)(value * CM_PER_METRE);
+}
+
 static void handleFix2(CanardInstance *ins, CanardRxTransfer *t)
 {
     UNUSED(ins);
 
+    if (t->payload_len < FIX2_PREFIX_BYTES) {
+        return;
+    }
+
     int64_t lon_1e8 = 0;
     int64_t lat_1e8 = 0;
     int32_t height_msl_mm = 0;
-    uint16_t velN_f16 = 0;
-    uint16_t velE_f16 = 0;
-    uint16_t velD_f16 = 0;
+    float velN, velE, velD;
     uint8_t satsUsed = 0;
     uint8_t status = 0;
 
     canardDecodeScalar(t, FIX2_OFFSET_LONGITUDE_1E8,  37, true,  &lon_1e8);
     canardDecodeScalar(t, FIX2_OFFSET_LATITUDE_1E8,   37, true,  &lat_1e8);
     canardDecodeScalar(t, FIX2_OFFSET_HEIGHT_MSL_MM,  27, true,  &height_msl_mm);
-    canardDecodeScalar(t, FIX2_OFFSET_VEL_N_F16,      16, false, &velN_f16);
-    canardDecodeScalar(t, FIX2_OFFSET_VEL_E_F16,      16, false, &velE_f16);
-    canardDecodeScalar(t, FIX2_OFFSET_VEL_D_F16,      16, false, &velD_f16);
     canardDecodeScalar(t, FIX2_OFFSET_SATS_USED,       6, false, &satsUsed);
     canardDecodeScalar(t, FIX2_OFFSET_STATUS,          2, false, &status);
 
-    const float velN = canardConvertFloat16ToNativeFloat(velN_f16);
-    const float velE = canardConvertFloat16ToNativeFloat(velE_f16);
-    const float velD = canardConvertFloat16ToNativeFloat(velD_f16);
+    if (lon_1e8 < INT64_C(-18000000000) || lon_1e8 > INT64_C(18000000000) ||
+        lat_1e8 < INT64_C(-9000000000) || lat_1e8 > INT64_C(9000000000) ||
+        !decodeVelocity(t, FIX2_OFFSET_VEL_N, &velN) ||
+        !decodeVelocity(t, FIX2_OFFSET_VEL_E, &velE) ||
+        !decodeVelocity(t, FIX2_OFFSET_VEL_D, &velD)) {
+        return;
+    }
 
-    const float speed2d = sqrtf(velN * velN + velE * velE);
-    const float speed3d = sqrtf(velN * velN + velE * velE + velD * velD);
+    const float speed2d = hypotf(velN, velE);
+    const float speed3d = hypotf(speed2d, velD);
     float courseDeg = (speed2d > 0.01f) ? (atan2f(velE, velN) * (180.0f / M_PIf)) : 0.0f;
     if (courseDeg < 0.0f) {
         courseDeg += 360.0f;
@@ -120,11 +147,11 @@ static void handleFix2(CanardInstance *ins, CanardRxTransfer *t)
     latest.llh.altCm = height_msl_mm / 10; // mm -> cm
     // Fix2 reports NED and gpsVelned_t is NED, so forward N/E/D unchanged
     // (velD is Down, positive downward).
-    latest.velned.velN = (int16_t)constrainf(velN * CM_PER_METRE, INT16_MIN, INT16_MAX);
-    latest.velned.velE = (int16_t)constrainf(velE * CM_PER_METRE, INT16_MIN, INT16_MAX);
-    latest.velned.velD = (int16_t)constrainf(velD * CM_PER_METRE, INT16_MIN, INT16_MAX);
-    latest.groundSpeed = (uint16_t)constrainf(speed2d * CM_PER_METRE, 0, UINT16_MAX);
-    latest.speed3d     = (uint16_t)constrainf(speed3d * CM_PER_METRE, 0, UINT16_MAX);
+    latest.velned.velN = (int16_t)metresToCentimetres(velN, INT16_MIN, INT16_MAX);
+    latest.velned.velE = (int16_t)metresToCentimetres(velE, INT16_MIN, INT16_MAX);
+    latest.velned.velD = (int16_t)metresToCentimetres(velD, INT16_MIN, INT16_MAX);
+    latest.groundSpeed = (uint16_t)metresToCentimetres(speed2d, 0, UINT16_MAX);
+    latest.speed3d     = (uint16_t)metresToCentimetres(speed3d, 0, UINT16_MAX);
     latest.groundCourse = (uint16_t)constrainf(courseDeg * 10.0f, 0, UINT16_MAX);
     latest.numSat      = satsUsed;
 

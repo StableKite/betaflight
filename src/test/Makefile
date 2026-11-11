@@ -30,6 +30,17 @@ VPATH := $(VPATH):$(USER_DIR):$(TEST_DIR)
 #   <test_name>_EXPAND (run for each target, call the above with target as $1)
 #   <test_name>_BLACKLIST (targets to exclude from an expanded test's run)
 
+dronecan_gnss_unittest_SRC := \
+		$(USER_DIR)/io/dronecan/dronecan_gnss.c \
+		$(TEST_DIR)/dronecan_gnss_canard.c
+
+dronecan_gnss_unittest_DEFINES := ENABLE_DRONECAN=1
+dronecan_gnss_unittest_INCLUDE_DIRS := $(ROOT)/lib/modules/dronecan/libcanard
+
+$(OBJECT_DIR)/dronecan_gnss_unittest/dronecan_gnss_canard.c.o \
+$(OBJECT_DIR)/dronecan_gnss_unittest/io/dronecan/dronecan_gnss.c.o \
+$(OBJECT_DIR)/dronecan_gnss_unittest/dronecan_gnss_unittest.o: $(ROOT)/lib/modules/dronecan/libcanard/canard.c
+
 alignsensor_unittest_SRC := \
 		$(USER_DIR)/sensors/boardalignment.c \
 		$(USER_DIR)/common/sensor_alignment.c \
