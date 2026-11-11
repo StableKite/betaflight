@@ -292,12 +292,16 @@ static void mspSerialPassthroughFn(serialPort_t *serialPort)
 }
 #endif
 
-static void mspFcSetPassthroughCommand(sbuf_t *dst, sbuf_t *src, mspPostProcessFnPtr *mspPostProcessFn)
+static mspResult_e mspFcSetPassthroughCommand(sbuf_t *dst, sbuf_t *src, mspPostProcessFnPtr *mspPostProcessFn)
 {
 #ifndef USE_SERIAL_PASSTHROUGH
     UNUSED(mspPostProcessFn);
 #endif
     const unsigned int dataSize = sbufBytesRemaining(src);
+    // Reject incomplete arguments before reading them or changing motor IO.
+    if (ARMING_FLAG(ARMED) || (dataSize != 0 && dataSize != 2)) {
+        return MSP_RESULT_ERROR;
+    }
     if (dataSize == 0) {
         // Legacy format
         mspPassthroughMode = MSP_PASSTHROUGH_ESC_4WAY;
@@ -322,6 +326,9 @@ static void mspFcSetPassthroughCommand(sbuf_t *dst, sbuf_t *src, mspPostProcessF
 #endif
 #ifdef USE_SERIAL_4WAY_BLHELI_INTERFACE
     case MSP_PASSTHROUGH_ESC_4WAY:
+        if (!mspPostProcessFn) {
+            return MSP_RESULT_ERROR;
+        }
         // get channel number
         // switch all motor lines HI
         // reply with the count of ESC found
@@ -353,6 +360,7 @@ static void mspFcSetPassthroughCommand(sbuf_t *dst, sbuf_t *src, mspPostProcessF
     default:
         sbufWriteU8(dst, 0);
     }
+    return MSP_RESULT_ACK;
 }
 
 MAYBE_UNUSED static void configRebootUpdateCheckU8(uint8_t *parm, uint8_t value)
@@ -4741,8 +4749,7 @@ mspResult_e mspFcProcessCommand(mspDescriptor_t srcDesc, mspPacket_t *cmd, mspPa
     } else if ((ret = mspFcProcessOutCommandWithArg(srcDesc, cmdMSP, src, dst, mspPostProcessFn)) != MSP_RESULT_CMD_UNKNOWN) {
         /* ret */;
     } else if (cmdMSP == MSP_SET_PASSTHROUGH) {
-        mspFcSetPassthroughCommand(dst, src, mspPostProcessFn);
-        ret = MSP_RESULT_ACK;
+        ret = mspFcSetPassthroughCommand(dst, src, mspPostProcessFn);
 #ifdef USE_FLASHFS
     } else if (cmdMSP == MSP_DATAFLASH_READ) {
         mspFcDataFlashReadCommand(dst, src);
