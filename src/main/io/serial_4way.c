@@ -38,6 +38,7 @@
 #include "drivers/light_led.h"
 #include "drivers/motor.h"
 #include "flight/mixer.h"
+#include "scheduler/scheduler.h"
 
 #include "io/beeper.h"
 #include "io/serial_4way.h"
@@ -162,6 +163,7 @@ void esc4wayRelease(void)
         IOConfigGPIO(escHardware[escCount].io, IOCFG_AF_PP);
         setEscLo(escCount);
     }
+    schedulerResetGyroTiming();
     motorEnable();
 }
 

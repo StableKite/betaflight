@@ -111,6 +111,8 @@ static FAST_DATA_ZERO_INIT bool gyroEnabled;
 
 static int32_t desiredPeriodCycles;
 static uint32_t lastTargetCycles;
+static uint32_t terminalGyroRateCount, terminalGyroLockCount;
+static int32_t sampleRateStartCycles, accGyroSkew;
 
 static uint8_t skippedRxAttempts = 0;
 #ifdef USE_OSD
@@ -636,8 +638,6 @@ FAST_CODE void scheduler(void)
             // Bring the scheduler into lock with the gyro
             if (gyro->gyroModeSPI != GYRO_EXTI_NO_INT) {
                 // Track the actual gyro rate over given number of cycle times and set the expected timebase
-                static uint32_t terminalGyroRateCount = 0;
-                static int32_t sampleRateStartCycles;
 
                 if (terminalGyroRateCount == 0) {
                     terminalGyroRateCount = gyro->detectedEXTI + GYRO_RATE_COUNT;
@@ -657,8 +657,6 @@ FAST_CODE void scheduler(void)
                 }
 
                 // Track the actual gyro rate over given number of cycle times and remove skew
-                static uint32_t terminalGyroLockCount = 0;
-                static int32_t accGyroSkew = 0;
 
                 int32_t gyroSkew = cmpTimeCycles(nextTargetCycles, gyro->gyroSyncEXTI) % desiredPeriodCycles;
                 if (gyroSkew > (desiredPeriodCycles / 2)) {
@@ -844,6 +842,15 @@ FAST_CODE void scheduler(void)
 #endif
 
     scheduleCount++;
+}
+
+void schedulerResetGyroTiming(void)
+{
+    // Resume from the current timer after an intentional configuration pause.
+    // Keep task enablement, filters, calibration and parameter groups intact.
+    lastTargetCycles = getCycleCounter();
+    terminalGyroRateCount = terminalGyroLockCount = 0;
+    accGyroSkew = 0;
 }
 
 void schedulerEnableGyro(void)
