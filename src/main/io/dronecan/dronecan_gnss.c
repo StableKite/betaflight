@@ -213,6 +213,11 @@ bool dronecanGnssGetLatest(gpsSolutionData_t *out)
     return true;
 }
 
+uint32_t dronecanGnssSequence(void)
+{
+    return latestSeq;
+}
+
 timeUs_t dronecanGnssLastUpdateUs(void)
 {
     // timeUs_t is 64-bit on targets with USE_64BIT_TIME (e.g. SITL), so a

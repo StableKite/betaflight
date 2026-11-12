@@ -45,4 +45,8 @@ bool dronecanGnssGetLatest(gpsSolutionData_t *out);
 // the DSDL timestamp). Used by gps.c to detect staleness.
 timeUs_t dronecanGnssLastUpdateUs(void);
 
+// Publication marker for the firmware task owner. It changes only when a
+// complete Fix2 transfer is accepted, including updates at the same clock tick.
+uint32_t dronecanGnssSequence(void);
+
 #endif // ENABLE_DRONECAN

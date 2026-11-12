@@ -1317,6 +1317,7 @@ static void updateDronecanGPS(void)
     // device's native rate from the DroneCAN RX path.
     const uint32_t updateInterval = 100;
     static uint32_t nextUpdateTime = 0;
+    static uint32_t lastSequence = 0;
 
     if (cmp32(gpsData.now, nextUpdateTime) <= 0) {
         return;
@@ -1334,11 +1335,17 @@ static void updateDronecanGPS(void)
     // If the cached frame is stale treat it as no new data: don't bump
     // lastNavMessage or keep SENSOR_GPS pegged, so the normal receive-timeout
     // path can trip to GPS_STATE_LOST_COMMUNICATION when the module dies.
-    const timeUs_t ageUs = micros() - dronecanGnssLastUpdateUs();
+    const timeDelta_t ageUs = cmpTimeUs(micros(), dronecanGnssLastUpdateUs());
     if (ageUs >= 2000000) { // 2 s
         gpsSetFixState(0);
         return;
     }
+
+    const uint32_t sequence = dronecanGnssSequence();
+    if (sequence == lastSequence) {
+        return;
+    }
+    lastSequence = sequence;
 
     if (gpsData.state == GPS_STATE_INITIALIZED) {
         gpsSetState(GPS_STATE_RECEIVING_DATA);
