@@ -77,6 +77,23 @@ TEST_F(Bmp5xxTest, SelectsSpiAtColdStartAndAfterSoftReset)
     EXPECT_EQ(1u, mock.resetWrites);
 }
 
+TEST_F(Bmp5xxTest, SpiPreservesTheFirstAndLastRegisterPayloadBytes)
+{
+    bus.busType = BUS_TYPE_SPI;
+    mock.spiSelected = false;
+    uint8_t chip = 0;
+    ASSERT_TRUE(bmp5xxDetect(&config, &baro, &chip));
+    EXPECT_EQ(0x50, chip);
+    mock.registers[0x27] = {1};
+    // Sensor register payload, with no extra byte after the SPI address.
+    // 0x180147 / 65536 deg C; 0x61a860 / 64 Pa.
+    mock.registers[0x1d] = {0x47, 0x01, 0x18, 0x60, 0xa8, 0x61};
+    int32_t pressure = -1, temperature = -1;
+    ASSERT_EQ(BMP5XX_READ_READY, bmp5xxReadSample(&baro, &pressure, &temperature));
+    EXPECT_EQ(100001, pressure);
+    EXPECT_EQ(2400, temperature);
+}
+
 TEST_F(Bmp5xxTest, AcceptsI2cResetNackWithValidPostResetStatus)
 {
     mock.resetNack = true;
@@ -233,11 +250,12 @@ bool busReadRegisterBuffer(const extDevice_t *dev, uint8_t reg, uint8_t *data, u
         mock.registers[reg] = {effective};
     }
     const auto found = mock.registers.find(reg);
-    const unsigned dummy = dev->bus->busType == BUS_TYPE_SPI ? 1 : 0;
-    if (found == mock.registers.end() || found->second.size()+dummy != length) return false;
+    // Bosch BMP581 SPI figures 10/11 and the SensorAPI return register data
+    // immediately after the address byte. The generic bus removes that address
+    // response; there is no additional sensor dummy byte to manufacture here.
+    if (found == mock.registers.end() || found->second.size() != length) return false;
     if (reg == 0x1d) ++mock.sampleReads;
-    if (dummy) data[0] = 0;
-    memcpy(data+dummy, found->second.data(), found->second.size());
+    memcpy(data, found->second.data(), found->second.size());
     if (reg == 0x27) mock.registers[reg] = {0}; // Clear-on-read INT_STATUS.
     return true;
 }

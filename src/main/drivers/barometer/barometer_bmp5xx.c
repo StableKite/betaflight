@@ -27,7 +27,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "platform.h"
 
@@ -223,8 +222,8 @@
 static uint32_t bmp5xx_up = 0;
 static uint32_t bmp5xx_ut = 0;
 
-// DMA buffer for sensor data (extra byte for SPI dummy)
-static DMA_DATA_ZERO_INIT uint8_t sensor_data_buffer[BMP5XX_DATA_FRAME_SIZE + 1];
+// DMA buffer for the complete temperature and pressure register payload.
+static DMA_DATA_ZERO_INIT uint8_t sensor_data_buffer[BMP5XX_DATA_FRAME_SIZE];
 static uint8_t *sensor_data = sensor_data_buffer;
 
 static bool bmp5xxStartUT(baroDev_t *baro);
@@ -243,22 +242,12 @@ static void bmp5xxCalculate(int32_t *pressure, int32_t *temperature);
  * @param data Buffer to store read data
  * @param length Number of bytes to read
  * @return true on success, false on failure
- * @note For SPI, first byte is dummy and is discarded
+ * @note BMP5xx SPI data follows the address byte immediately. The generic
+ *       bus consumes the address response; no additional dummy is discarded.
  */
 static bool bmp5xxReadRegisterBuffer(const extDevice_t *dev, uint8_t reg, uint8_t *data, uint8_t length)
 {
-    if (dev->bus->busType == BUS_TYPE_SPI) {
-        // For SPI: first byte is dummy on BMP5xx read
-        // Max read size: BMP5XX_DATA_FRAME_SIZE (6) + 1 dummy = 7 bytes
-        uint8_t buf[BMP5XX_DATA_FRAME_SIZE + 1];
-        bool ret = busReadRegisterBuffer(dev, reg, buf, length + 1);
-        if (ret) {
-            memcpy(data, buf + 1, length);
-        }
-        return ret;
-    } else {
-        return busReadRegisterBuffer(dev, reg, data, length);
-    }
+    return busReadRegisterBuffer(dev, reg, data, length);
 }
 
 static bool bmp5xxSelectSpi(const extDevice_t *dev)
