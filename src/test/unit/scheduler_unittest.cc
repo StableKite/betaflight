@@ -552,3 +552,74 @@ TEST(SchedulerUnittest, TestGyroTask)
     EXPECT_EQ(static_cast<task_t*>(0), unittest_scheduler_selectedTask);
 }
 
+
+namespace {
+void prepareGyroRateTest(uint32_t initialInterrupt)
+{
+    schedulerInit();
+    for (int taskId = 0; taskId < TASK_COUNT; ++taskId) {
+        setTaskEnabled(static_cast<taskId_e>(taskId), false);
+    }
+    rescheduleTask(TASK_GYRO, TASK_PERIOD_HZ(TEST_GYRO_SAMPLE_HZ));
+    setTaskEnabled(TASK_GYRO, true);
+    schedulerEnableGyro();
+    taskFilterReady = taskPidReady = false;
+    gyro.gyroModeSPI = GYRO_EXTI_INT;
+    gyro.detectedEXTI = initialInterrupt;
+    simulatedTime = 100000;
+    schedulerResetGyroTiming();
+}
+
+void supplyGyroEdges(uint32_t &sourceTime, uint32_t edges)
+{
+    sourceTime += edges * TASK_PERIOD_HZ(TEST_GYRO_SAMPLE_HZ);
+    simulatedTime = sourceTime;
+    gyro.detectedEXTI += edges;
+    gyro.gyroSyncEXTI = clockMicrosToCycles(sourceTime);
+    tasks[TASK_GYRO].lastExecutedAtUs = sourceTime - TASK_PERIOD_HZ(TEST_GYRO_SAMPLE_HZ);
+    resetGyroTaskTestFlags();
+    scheduler();
+    EXPECT_TRUE(taskGyroRan);
+}
+}
+
+TEST(SchedulerUnittest, GyroRateUsesElapsedInterrupts)
+{
+    prepareGyroRateTest(0);
+    uint32_t sourceTime = simulatedTime;
+    for (unsigned i = 0; i < GYRO_RATE_COUNT + 2; ++i) {
+        supplyGyroEdges(sourceTime, 1);
+    }
+    EXPECT_NEAR(1.0f, schedulerGetCycleTimeMultiplier(), 0.01f);
+    // No scheduler call occurs during this blocking interval. IRQs continue.
+    supplyGyroEdges(sourceTime, GYRO_RATE_COUNT * 3);
+    EXPECT_NEAR(1.0f, schedulerGetCycleTimeMultiplier(), 0.01f);
+    for (unsigned i = 0; i < GYRO_RATE_COUNT + 2; ++i) {
+        supplyGyroEdges(sourceTime, 1);
+    }
+    EXPECT_NEAR(1.0f, schedulerGetCycleTimeMultiplier(), 0.01f);
+    gyro.gyroModeSPI = GYRO_EXTI_NO_INT;
+}
+
+TEST(SchedulerUnittest, GyroInterruptCountWrapAndTimingReset)
+{
+    prepareGyroRateTest(UINT32_MAX - GYRO_RATE_COUNT / 2);
+    uint32_t sourceTime = simulatedTime;
+    for (unsigned i = 0; i < GYRO_RATE_COUNT * 2; ++i) {
+        supplyGyroEdges(sourceTime, 1);
+    }
+    EXPECT_NEAR(1.0f, schedulerGetCycleTimeMultiplier(), 0.01f);
+    const auto lastExecution = tasks[TASK_GYRO].lastExecutedAtUs;
+    sourceTime += TASK_PERIOD_HZ(TEST_GYRO_SAMPLE_HZ) * GYRO_RATE_COUNT * 4;
+    gyro.detectedEXTI += GYRO_RATE_COUNT * 4;
+    simulatedTime = sourceTime;
+    schedulerResetGyroTiming();
+    EXPECT_EQ(sourceTime, simulatedTime);
+    EXPECT_EQ(lastExecution, tasks[TASK_GYRO].lastExecutedAtUs);
+    EXPECT_EQ(TASK_PERIOD_HZ(TEST_GYRO_SAMPLE_HZ), tasks[TASK_GYRO].attribute->desiredPeriodUs);
+    for (unsigned i = 0; i < GYRO_RATE_COUNT + 2; ++i) {
+        supplyGyroEdges(sourceTime, 1);
+    }
+    EXPECT_NEAR(1.0f, schedulerGetCycleTimeMultiplier(), 0.01f);
+    gyro.gyroModeSPI = GYRO_EXTI_NO_INT;
+}
