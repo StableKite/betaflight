@@ -333,6 +333,9 @@ link_quality_unittest_DEFINES := \
 		USE_CRSF_LINK_STATISTICS= \
 		USE_RX_LINK_QUALITY_INFO=
 
+bitarray_unittest_SRC := \
+		$(USER_DIR)/common/bitarray.c
+
 pg_unittest_SRC := \
 		$(USER_DIR)/common/crc.c \
 		$(USER_DIR)/common/streambuf.c \

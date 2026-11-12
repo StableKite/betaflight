@@ -26,7 +26,7 @@
 
 #include "bitarray.h"
 
-#define BITARRAY_BIT_OP(array, bit, op) ((array)[(bit) / (sizeof((array)[0]) * 8)] op (1 << ((bit) % (sizeof((array)[0]) * 8))))
+#define BITARRAY_BIT_OP(array, bit, op) ((array)[(bit) / (sizeof((array)[0]) * 8)] op (1U << ((bit) % (sizeof((array)[0]) * 8))))
 
 bool bitArrayGet(const void *array, unsigned bit)
 {
