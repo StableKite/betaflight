@@ -761,8 +761,9 @@ static void writeIntraframe(void)
     }
 
     if (isFieldEnabled(FIELD_SELECT(MOTOR))) {
-        //Motors can be below minimum output when disarmed, but that doesn't happen much
-        blackboxWriteUnsignedVB(blackboxCurrent->motor[0] - getMotorOutputLow());
+        // Use the same rounded predictor as the motorOutput header. A disarmed
+        // motor can be below it; convert the integer residual to unsigned.
+        blackboxWriteUnsignedVB((uint32_t)(blackboxCurrent->motor[0] - lrintf(getMotorOutputLow())));
 
         //Motors tend to be similar to each other so use the first motor's value as a predictor of the others
         const int motorCount = getMotorCount();
