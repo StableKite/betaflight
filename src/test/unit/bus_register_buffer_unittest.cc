@@ -86,7 +86,8 @@ protected:
         gyro.dev.busType_u.spi.csnPin = gyroCs;
         gyro.dev.callbackArg = (uintptr_t)&gyro;
         gyro.gyroModeSPI = GYRO_EXTI_INT_DMA;
-        gyro.segments[0] = {.u.buffers = {txBuf, rxBuf}, 15, true, mpuIntCallback};
+        // A transfer-only fixture needs no flight-controller callback.
+        gyro.segments[0] = {.u.buffers = {txBuf, rxBuf}, 15, true, nullptr};
         gyro.segments[1] = {.u.link = {nullptr, nullptr}, 0, true, nullptr};
 
         memset(&other, 0, sizeof(other));

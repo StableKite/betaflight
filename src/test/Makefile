@@ -115,8 +115,7 @@ bus_register_buffer_unittest_SRC := \
         $(USER_DIR)/build/atomic.c \
         $(USER_DIR)/drivers/bus.c \
         $(USER_DIR)/drivers/bus_i2c_busdev.c \
-        $(USER_DIR)/drivers/bus_spi.c \
-        $(USER_DIR)/drivers/accgyro/accgyro_mpu.c
+        $(USER_DIR)/drivers/bus_spi.c
 
 bus_register_buffer_unittest_DEFINES := \
         USE_I2C= USE_SPI= USE_SPI_DEVICE_1= USE_SPI_GYRO= \
