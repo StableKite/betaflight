@@ -644,12 +644,16 @@ FAST_CODE void scheduler(void)
                     sampleRateStartCycles = nowCycles;
                 }
 
-                if (gyro->detectedEXTI >= terminalGyroRateCount) {
-                    // Calculate the number of clock cycles on average between gyro interrupts
-                    uint32_t sampleCycles = nowCycles - sampleRateStartCycles;
-                    desiredPeriodCycles = sampleCycles / GYRO_RATE_COUNT;
+                if (cmp32(gyro->detectedEXTI, terminalGyroRateCount) >= 0) {
+                    // A blocking task can span more than one interrupt window.
+                    // Measure all elapsed edges, then start a new window.
+                    const uint32_t sampleCount = gyro->detectedEXTI - (terminalGyroRateCount - GYRO_RATE_COUNT);
+                    const uint32_t sampleCycles = nowCycles - sampleRateStartCycles;
+                    if (sampleCount && sampleCycles >= sampleCount) {
+                        desiredPeriodCycles = sampleCycles / sampleCount;
+                    }
                     sampleRateStartCycles = nowCycles;
-                    terminalGyroRateCount += GYRO_RATE_COUNT;
+                    terminalGyroRateCount = gyro->detectedEXTI + GYRO_RATE_COUNT;
                 }
 
                 // Track the actual gyro rate over given number of cycle times and remove skew
@@ -690,8 +694,8 @@ FAST_CODE void scheduler(void)
                     terminalGyroLockCount = gyro->detectedEXTI + GYRO_LOCK_COUNT;
                 }
 
-                if (gyro->detectedEXTI >= terminalGyroLockCount) {
-                    terminalGyroLockCount += GYRO_LOCK_COUNT;
+                if (cmp32(gyro->detectedEXTI, terminalGyroLockCount) >= 0) {
+                    terminalGyroLockCount = gyro->detectedEXTI + GYRO_LOCK_COUNT;
 
                     // Move the desired start time of the gyroTask
                     lastTargetCycles -= (accGyroSkew/GYRO_LOCK_COUNT);
