@@ -19,6 +19,8 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "platform.h"
+
 #include "dronecan_esc_protocol.h"
 
 int16_t dronecanEscBroadcastRaw(CanardInstance *ins, const int16_t *commands,
