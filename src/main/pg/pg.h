@@ -140,7 +140,11 @@ extern const uint8_t __pg_resetdata_end[];
 
 #define PG_REGISTER_WITH_RESET_FN(_type, _name, _pgn, _version)         \
     static void pgResetFn_ ## _name(_type *);                           \
-    PG_REGISTER_I(_type, _name, _pgn, _version, .reset = {.fn = (pgResetFunc*)&pgResetFn_ ## _name }) \
+    static void pgResetFnAdapter_ ## _name(void *base)                  \
+    {                                                                  \
+        pgResetFn_ ## _name((_type *)base);                            \
+    }                                                                  \
+    PG_REGISTER_I(_type, _name, _pgn, _version, .reset = {.fn = pgResetFnAdapter_ ## _name}) \
     /**/
 
 #define PG_REGISTER_WITH_RESET_TEMPLATE(_type, _name, _pgn, _version)   \
@@ -172,7 +176,11 @@ extern const uint8_t __pg_resetdata_end[];
 
 #define PG_REGISTER_ARRAY_WITH_RESET_FN(_type, _length, _name, _pgn, _version) \
     extern void pgResetFn_ ## _name(_type *);    \
-    PG_REGISTER_ARRAY_I(_type, _length, _name, _pgn, _version, .reset = {.fn = (pgResetFunc*)&pgResetFn_ ## _name}) \
+    static void pgResetFnAdapter_ ## _name(void *base)                  \
+    {                                                                  \
+        pgResetFn_ ## _name((_type *)base);                            \
+    }                                                                  \
+    PG_REGISTER_ARRAY_I(_type, _length, _name, _pgn, _version, .reset = {.fn = pgResetFnAdapter_ ## _name}) \
     /**/
 
 #if 0

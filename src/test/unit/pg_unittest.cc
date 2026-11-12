@@ -55,6 +55,33 @@ PG_RESET_TEMPLATE(motorConfig_t, motorConfig,
     .kv = 1000,
     .motorPoleCount = 14,
 );
+
+typedef struct {
+    uint32_t value;
+    uint8_t zeroed;
+} resetCallbackTest_t;
+
+static unsigned scalarResetCalls;
+static unsigned arrayResetCalls;
+static void *scalarResetDestination;
+static void *arrayResetDestination;
+
+PG_REGISTER_WITH_RESET_FN(resetCallbackTest_t, scalarResetTest, 0x0ff0, 0);
+void pgResetFn_scalarResetTest(resetCallbackTest_t *config)
+{
+    scalarResetCalls++;
+    scalarResetDestination = config;
+    config->value = 0x12345678;
+}
+
+PG_REGISTER_ARRAY_WITH_RESET_FN(resetCallbackTest_t, 2, arrayResetTest, 0x0ff1, 0);
+void pgResetFn_arrayResetTest(resetCallbackTest_t *config)
+{
+    arrayResetCalls++;
+    arrayResetDestination = config;
+    config[0].value = 101;
+    config[1].value = 202;
+}
 }
 
 
@@ -93,6 +120,44 @@ TEST(ParameterGroupsfTest, Test_pgFind)
     EXPECT_EQ(1850, motorConfig3.maxthrottle);
     EXPECT_EQ(1000, motorConfig3.mincommand);
     EXPECT_EQ(400, motorConfig3.dev.motorPwmRate);
+}
+
+TEST(ParameterGroupsfTest, ScalarResetCallbackUsesRequestedInstance)
+{
+    resetCallbackTest_t destination;
+    memset(&destination, 0xff, sizeof(destination));
+    scalarResetTest_System.value = 999;
+    scalarResetCalls = 0;
+    scalarResetDestination = nullptr;
+
+    pgResetInstance(&scalarResetTest_Registry, reinterpret_cast<uint8_t *>(&destination));
+
+    EXPECT_EQ(1u, scalarResetCalls);
+    EXPECT_EQ(&destination, scalarResetDestination);
+    EXPECT_EQ(0x12345678u, destination.value);
+    EXPECT_EQ(0, destination.zeroed);
+    EXPECT_EQ(999u, scalarResetTest_System.value);
+}
+
+TEST(ParameterGroupsfTest, ArrayResetCallbackUsesRequestedInstance)
+{
+    resetCallbackTest_t destination[2];
+    memset(destination, 0xff, sizeof(destination));
+    arrayResetTest_SystemArray[0].value = 777;
+    arrayResetTest_SystemArray[1].value = 888;
+    arrayResetCalls = 0;
+    arrayResetDestination = nullptr;
+
+    pgResetInstance(&arrayResetTest_Registry, reinterpret_cast<uint8_t *>(destination));
+
+    EXPECT_EQ(1u, arrayResetCalls);
+    EXPECT_EQ(destination, arrayResetDestination);
+    EXPECT_EQ(101u, destination[0].value);
+    EXPECT_EQ(202u, destination[1].value);
+    EXPECT_EQ(0, destination[0].zeroed);
+    EXPECT_EQ(0, destination[1].zeroed);
+    EXPECT_EQ(777u, arrayResetTest_SystemArray[0].value);
+    EXPECT_EQ(888u, arrayResetTest_SystemArray[1].value);
 }
 
 // STUBS
