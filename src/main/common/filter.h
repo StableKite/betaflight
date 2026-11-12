@@ -123,28 +123,48 @@ float pt1FilterGainFromDelay(float delay, float dT);
 void pt1FilterInit(pt1Filter_t *filter, float k);
 void pt1FilterUpdateCutoff(pt1Filter_t *filter, float k);
 float pt1FilterApply(pt1Filter_t *filter, float input);
+static inline float pt1FilterApplyFn(filter_t *filter, float input)
+{
+    return pt1FilterApply((pt1Filter_t *)filter, input);
+}
 
 float pt2FilterGain(float f_cut, float dT);
 float pt2FilterGainFromDelay(float delay, float dT);
 void pt2FilterInit(pt2Filter_t *filter, float k);
 void pt2FilterUpdateCutoff(pt2Filter_t *filter, float k);
 float pt2FilterApply(pt2Filter_t *filter, float input);
+static inline float pt2FilterApplyFn(filter_t *filter, float input)
+{
+    return pt2FilterApply((pt2Filter_t *)filter, input);
+}
 
 float pt3FilterGain(float f_cut, float dT);
 float pt3FilterGainFromDelay(float delay, float dT);
 void pt3FilterInit(pt3Filter_t *filter, float k);
 void pt3FilterUpdateCutoff(pt3Filter_t *filter, float k);
 float pt3FilterApply(pt3Filter_t *filter, float input);
+static inline float pt3FilterApplyFn(filter_t *filter, float input)
+{
+    return pt3FilterApply((pt3Filter_t *)filter, input);
+}
 
 float filterGetNotchQ(float centerFreq, float cutoffFreq);
 
 void svfLowpassFilterInit(svfLowpassFilter_t *filter, float filterFreq, float dt);
 void svfLowpassFilterUpdate(svfLowpassFilter_t *filter, float filterFreq, float dt);
 float svfLowpassFilterApply(svfLowpassFilter_t *filter, float input);
+static inline float svfLowpassFilterApplyFn(filter_t *filter, float input)
+{
+    return svfLowpassFilterApply((svfLowpassFilter_t *)filter, input);
+}
 
 void svfNotchInit(svfNotchFilter_t *filter, float filterFreq, float dt, float Q);
 void svfNotchUpdate(svfNotchFilter_t *filter, float filterFreq, float dt, float Q);
 float svfNotchApply(svfNotchFilter_t *filter, float input);
+static inline float svfNotchApplyFn(filter_t *filter, float input)
+{
+    return svfNotchApply((svfNotchFilter_t *)filter, input);
+}
 
 void rpmNotchInit(rpmNotch_t *filter, float filterFreq, float dt, float Q, float weight);
 void rpmNotchUpdate(rpmNotch_t *filter, float filterFreq, float dt, float Q, float weight);

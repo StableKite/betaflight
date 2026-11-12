@@ -21,6 +21,7 @@
 #include <limits.h>
 
 #include <math.h>
+#include <string.h>
 
 extern "C" {
     #include "common/filter.h"
@@ -113,4 +114,58 @@ TEST(FilterUnittest, TestSlewFilter)
     EXPECT_EQ(-1800, filter.state);
     slewFilterApply(&filter, 200.0f);
     EXPECT_EQ(200, filter.state);
+}
+
+// The callback signature is erased, but its state updates and floating-point
+// results must stay bit-for-bit identical to the typed filter entry point.
+template <typename Filter>
+static void expectIdenticalFilterDispatch(Filter initial, float (*typed)(Filter *, float), filterApplyFnPtr callback)
+{
+    Filter direct = initial;
+    Filter generic = initial;
+    for (unsigned i = 0; i < 256; i++) {
+        float input = (int)((i * 37) % 257) - 128;
+        input *= (i % 31 == 0) ? 0.5f : 0.03125f;
+        const float expected = typed(&direct, input);
+        const float actual = callback(reinterpret_cast<filter_t *>(&generic), input);
+        uint32_t expectedBits, actualBits;
+        memcpy(&expectedBits, &expected, sizeof(expectedBits));
+        memcpy(&actualBits, &actual, sizeof(actualBits));
+        ASSERT_EQ(expectedBits, actualBits) << "sample " << i;
+    }
+}
+
+TEST(FilterUnittest, Pt1CallbackPreservesTypedResults)
+{
+    pt1Filter_t state = {};
+    pt1FilterInit(&state, 0.23f);
+    expectIdenticalFilterDispatch(state, pt1FilterApply, pt1FilterApplyFn);
+}
+
+TEST(FilterUnittest, Pt2CallbackPreservesTypedResults)
+{
+    pt2Filter_t state = {};
+    pt2FilterInit(&state, 0.23f);
+    expectIdenticalFilterDispatch(state, pt2FilterApply, pt2FilterApplyFn);
+}
+
+TEST(FilterUnittest, Pt3CallbackPreservesTypedResults)
+{
+    pt3Filter_t state = {};
+    pt3FilterInit(&state, 0.23f);
+    expectIdenticalFilterDispatch(state, pt3FilterApply, pt3FilterApplyFn);
+}
+
+TEST(FilterUnittest, SvfLowpassCallbackPreservesTypedResults)
+{
+    svfLowpassFilter_t state = {};
+    svfLowpassFilterInit(&state, 123.0f, 0.000125f);
+    expectIdenticalFilterDispatch(state, svfLowpassFilterApply, svfLowpassFilterApplyFn);
+}
+
+TEST(FilterUnittest, SvfNotchCallbackPreservesTypedResults)
+{
+    svfNotchFilter_t state = {};
+    svfNotchInit(&state, 180.0f, 0.000125f, 1.3f);
+    expectIdenticalFilterDispatch(state, svfNotchApply, svfNotchApplyFn);
 }
