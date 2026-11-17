@@ -44,6 +44,7 @@
 #include "drivers/rangefinder/rangefinder_lidarmt.h"
 #include "drivers/rangefinder/rangefinder_nooploop.h"
 #include "drivers/rangefinder/rangefinder_upt1.h"
+#include "drivers/rangefinder/rangefinder_virtual.h"
 #include "drivers/time.h"
 
 #include "fc/runtime_config.h"
@@ -76,7 +77,11 @@ rangefinder_t rangefinder;
 PG_REGISTER_WITH_RESET_TEMPLATE(rangefinderConfig_t, rangefinderConfig, PG_RANGEFINDER_CONFIG, 0);
 
 PG_RESET_TEMPLATE(rangefinderConfig_t, rangefinderConfig,
+#ifdef DEFAULT_RANGEFINDER_HARDWARE
+    .rangefinder_hardware = DEFAULT_RANGEFINDER_HARDWARE,
+#else
     .rangefinder_hardware = RANGEFINDER_NONE,
+#endif
 );
 
 #ifdef USE_RANGEFINDER_HCSR04
@@ -100,6 +105,15 @@ static bool rangefinderDetect(rangefinderDev_t * dev, uint8_t rangefinderHardwar
 #endif
 
     switch (rangefinderHardwareToUse) {
+        case RANGEFINDER_VIRTUAL:
+#ifdef USE_VIRTUAL_RANGEFINDER
+            if (virtualRangefinderDetect(dev)) {
+                rangefinderHardware = RANGEFINDER_VIRTUAL;
+                rescheduleTask(TASK_RANGEFINDER, TASK_PERIOD_MS(dev->delayMs));
+            }
+#endif
+            break;
+
         case RANGEFINDER_HCSR04:
 #ifdef USE_RANGEFINDER_HCSR04
             {

@@ -6,6 +6,8 @@ TARGET_SRC = \
             drivers/accgyro/accgyro_virtual.c \
             drivers/barometer/barometer_virtual.c \
             drivers/compass/compass_virtual.c \
+            drivers/rangefinder/rangefinder_virtual.c \
+            drivers/opticalflow/opticalflow_virtual.c \
             drivers/serial_tcp.c \
             io/gps_virtual.c \
             blackbox/blackbox_virtual.c

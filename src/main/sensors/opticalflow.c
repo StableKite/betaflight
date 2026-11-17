@@ -60,6 +60,7 @@
 #include "sensors/gyro.h"
 #include "sensors/acceleration.h"
 #include "sensors/opticalflow.h"
+#include "drivers/opticalflow/opticalflow_virtual.h"
 
 #define OPTICALFLOW_CALIBRATION_DURATION_MS 30000
 #define RATE_SCALE_RESOLUTION (1000.0f)
@@ -74,7 +75,11 @@ static void applyLPF(vector2_t * flowRates);
 PG_REGISTER_WITH_RESET_TEMPLATE(opticalflowConfig_t, opticalflowConfig, PG_OPTICALFLOW_CONFIG, 1);
 
 PG_RESET_TEMPLATE(opticalflowConfig_t, opticalflowConfig,
+#ifdef DEFAULT_OPTICALFLOW_HARDWARE
+    .opticalflow_hardware = DEFAULT_OPTICALFLOW_HARDWARE,
+#else
     .opticalflow_hardware = OPTICALFLOW_NONE,
+#endif
     .rotation = 0,
     .flip_x = 0,
     .flow_lpf = 100
@@ -94,6 +99,15 @@ static bool opticalflowDetect(opticalflowDev_t * dev, uint8_t opticalflowHardwar
     opticalflowType_e opticalflowHardware = OPTICALFLOW_NONE;
 
     switch (opticalflowHardwareToUse) {
+        case OPTICALFLOW_VIRTUAL:
+#ifdef USE_VIRTUAL_OPTICALFLOW
+            if (virtualOpticalflowDetect(dev)) {
+                opticalflowHardware = OPTICALFLOW_VIRTUAL;
+                rescheduleTask(TASK_OPTICALFLOW, TASK_PERIOD_MS(dev->delayMs));
+            }
+#endif
+            break;
+
         case OPTICALFLOW_MT:
 #if defined(USE_OPTICALFLOW_MT) && defined(USE_RANGEFINDER_MT)
             if (mtOpticalflowDetect(dev, rangefinderConfig()->rangefinder_hardware)) {
