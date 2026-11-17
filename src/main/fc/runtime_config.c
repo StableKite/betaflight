@@ -82,12 +82,21 @@ void unsetArmingDisabled(armingDisableFlags_e flag)
 
 bool isArmingDisabled(void)
 {
-    return armingDisableFlags;
+    return getArmingDisableFlags() != 0;
 }
+
+#ifdef PYBF_EMBEDDED_PLATFORM
+uint32_t pybf_port_system_arming_disable_flags(void);
+#endif
 
 armingDisableFlags_e getArmingDisableFlags(void)
 {
+#ifdef PYBF_EMBEDDED_PLATFORM
+    // Board inhibits can add reasons without clearing firmware-owned inhibits.
+    return armingDisableFlags | pybf_port_system_arming_disable_flags();
+#else
     return armingDisableFlags;
+#endif
 }
 
 // return name for given flag

@@ -81,6 +81,10 @@ void rxMspFrameReceive(const uint16_t *frame, int channelCount)
     rxMspOverrideFrameDone = true;
 }
 
+#ifdef PYBF_EMBEDDED_PLATFORM
+bool pybf_port_system_rx_link_lost(void);
+#endif
+
 static uint8_t rxMspFrameStatus(rxRuntimeState_t *rxRuntimeState)
 {
     if (!rxMspFrameDone) {
@@ -88,6 +92,11 @@ static uint8_t rxMspFrameStatus(rxRuntimeState_t *rxRuntimeState)
     }
 
     rxMspFrameDone = false;
+#ifdef PYBF_EMBEDDED_PLATFORM
+    if (pybf_port_system_rx_link_lost()) {
+        return RX_FRAME_DROPPED;
+    }
+#endif
     rxRuntimeState->lastRcFrameTimeUs = micros();
     return RX_FRAME_COMPLETE;
 }
@@ -100,6 +109,11 @@ uint8_t rxMspOverrideFrameStatus(void)
     }
 
     rxMspOverrideFrameDone = false;
+#ifdef PYBF_EMBEDDED_PLATFORM
+    if (pybf_port_system_rx_link_lost()) {
+        return RX_FRAME_DROPPED;
+    }
+#endif
     return RX_FRAME_COMPLETE;
 }
 #endif
