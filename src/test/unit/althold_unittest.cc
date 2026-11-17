@@ -60,13 +60,16 @@ extern "C" {
     PG_REGISTER(positionConfig_t, positionConfig, PG_POSITION, 0);
     PG_REGISTER(rcControlsConfig_t, rcControlsConfig, PG_RC_CONTROLS_CONFIG, 0);
 
-    bool failsafeIsActive(void) { return false; }
+    bool testFailsafeActive = false;
+    bool failsafeIsActive(void) { return testFailsafeActive; }
     timeUs_t currentTimeUs = 0;
     bool isAltHoldActive();
     extern float testAltitudeCm;
     extern float testAltitudeDerivativeCmS;
     extern float testCosTiltAngle;
     extern throttleStatus_e testThrottleStatus;
+    positionNavCommand_t testNavCommand = {};
+    vector3_t testNavVelocity = {};
 }
 
 #include "unittest_macros.h"
@@ -89,6 +92,11 @@ protected:
         testAltitudeDerivativeCmS = 0.0f;
         testCosTiltAngle = 1.0f;
         testThrottleStatus = THROTTLE_LOW;
+        testFailsafeActive = false;
+        testNavCommand = {};
+        testNavVelocity = {};
+        debugMode = DEBUG_AUTOPILOT_ALTITUDE;
+        memset(debug, 0, sizeof(debug));
 
         autopilotConfig_t *apCfg = autopilotConfigMutable();
         apCfg->hoverThrottle = 1500;
@@ -207,6 +215,105 @@ TEST_F(AltholdControlUnittest, AltitudeControlCompensatesForTilt)
     EXPECT_GT(tiltedThrottle, levelThrottle);
 }
 
+TEST_F(AltholdControlUnittest, ClearedNavigationCapturesCurrentAltitude)
+{
+    flightModeFlags = ALT_HOLD_MODE;
+    testNavCommand.active = true;
+    testNavCommand.includeAltitude = true;
+    testNavCommand.targetPosEfM.z = 5.0f;
+    updateAltHold(currentTimeUs);
+    ASSERT_EQ(debug[2], 500);
+
+    // The waypoint callback may clear the command before Alt Hold sees completed.
+    testAltitudeCm = 525.0f;
+    testNavCommand.active = false;
+    updateAltHold(currentTimeUs);
+    EXPECT_EQ(debug[2], 525);
+
+    testAltitudeCm = 550.0f;
+    updateAltHold(currentTimeUs);
+    EXPECT_EQ(debug[2], 525);
+}
+
+TEST_F(AltholdControlUnittest, CancelledClimbDoesNotRetainTargetOrFeedforward)
+{
+    autopilotConfigMutable()->altitudeF = 100;
+    autopilotInit();
+    flightModeFlags = ALT_HOLD_MODE;
+    testNavCommand.active = true;
+    testNavCommand.includeAltitude = true;
+    testNavCommand.targetPosEfM.z = 10.0f;
+    testNavVelocity.z = 200.0f;
+    updateAltHold(currentTimeUs);
+    ASSERT_GT(debug[6], 0);
+
+    testAltitudeCm = 250.0f;
+    testNavCommand.active = false;
+    updateAltHold(currentTimeUs);
+    EXPECT_EQ(debug[2], 250);
+    EXPECT_EQ(debug[6], 0);
+}
+
+TEST_F(AltholdControlUnittest, HorizontalNavigationCapturesPreviousClimbAltitude)
+{
+    flightModeFlags = ALT_HOLD_MODE;
+    testNavCommand.active = true;
+    testNavCommand.includeAltitude = true;
+    testNavCommand.targetPosEfM.z = 10.0f;
+    updateAltHold(currentTimeUs);
+
+    testAltitudeCm = 450.0f;
+    testNavCommand.includeAltitude = false;
+    updateAltHold(currentTimeUs);
+    EXPECT_EQ(debug[2], 450);
+}
+
+TEST_F(AltholdControlUnittest, NavigationKeepsTargetUntilCommandIsCleared)
+{
+    flightModeFlags = ALT_HOLD_MODE;
+    testNavCommand.active = true;
+    testNavCommand.includeAltitude = true;
+    testNavCommand.targetPosEfM.z = 5.0f;
+    testAltitudeCm = 400.0f;
+    updateAltHold(currentTimeUs);
+    EXPECT_EQ(debug[2], 500);
+
+    testNavCommand.completed = true;
+    updateAltHold(currentTimeUs);
+    EXPECT_EQ(debug[2], 500);
+}
+
+TEST_F(AltholdControlUnittest, PilotCanAdjustAltitudeAfterNavigation)
+{
+    flightModeFlags = ALT_HOLD_MODE;
+    testNavCommand.active = true;
+    testNavCommand.includeAltitude = true;
+    testNavCommand.targetPosEfM.z = 5.0f;
+    updateAltHold(currentTimeUs);
+
+    testAltitudeCm = 300.0f;
+    testNavCommand.active = false;
+    testThrottleStatus = THROTTLE_HIGH;
+    rcCommand[THROTTLE] = 2000.0f;
+    updateAltHold(currentTimeUs);
+    EXPECT_EQ(debug[2], 305);
+}
+
+TEST_F(AltholdControlUnittest, FailsafeDescentOverridesNavigationHandoff)
+{
+    flightModeFlags = ALT_HOLD_MODE;
+    testNavCommand.active = true;
+    testNavCommand.includeAltitude = true;
+    testNavCommand.targetPosEfM.z = 5.0f;
+    updateAltHold(currentTimeUs);
+
+    testAltitudeCm = 300.0f;
+    testNavCommand.active = false;
+    testFailsafeActive = true;
+    updateAltHold(currentTimeUs);
+    EXPECT_EQ(debug[2], 295);
+}
+
 // STUBS
 
 extern "C" {
@@ -250,10 +357,10 @@ extern "C" {
     void positionNavInit(void) { }
     void positionNavReset(void) { }
     void positionNavUpdate(float /*dt*/, const positionEstimate3d_t * /*est*/) { }
-    bool positionNavHasActiveTarget(void) { return false; }
-    bool positionNavTargetReached(void) { return false; }
-    vector3_t positionNavGetTargetVelocityCmS(void) { return (vector3_t){{0, 0, 0}}; }
-    const positionNavCommand_t *positionNavGetActiveCommand(void) { return NULL; }
+    bool positionNavHasActiveTarget(void) { return testNavCommand.active; }
+    bool positionNavTargetReached(void) { return testNavCommand.completed; }
+    vector3_t positionNavGetTargetVelocityCmS(void) { return testNavVelocity; }
+    const positionNavCommand_t *positionNavGetActiveCommand(void) { return &testNavCommand; }
 
     void parseRcChannels(const char *input, rxConfig_t *rxConfig) {
         UNUSED(input);

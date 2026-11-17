@@ -44,6 +44,7 @@ static const float taskIntervalSeconds = HZ_TO_INTERVAL(ALTHOLD_TASK_RATE_HZ); /
 
 typedef struct {
     bool isActive;
+    bool navAltitudeActive;
     float targetAltitudeCm;
     float maxVelocity;
     float targetVelocity;
@@ -58,6 +59,7 @@ static void altHoldReset(void)
     resetAltitudeControl();
     altHold.targetAltitudeCm = getAltitudeCmControl();
     altHold.targetVelocity = 0.0f;
+    altHold.navAltitudeActive = false;
 }
 
 void altHoldInit(void)
@@ -83,6 +85,7 @@ static void altHoldProcessTransitions(void) {
             autopilotClearAltHoldHoverThrottle();
         }
         altHold.isActive = false;
+        altHold.navAltitudeActive = false;
     }
 
     // ** the transition out of alt hold (exiting altHold) may be rough.  Some notes... **
@@ -142,6 +145,18 @@ static void altHoldUpdateTargetAltitude(void)
 
 static void altHoldUpdate(void)
 {
+    const positionNavCommand_t *navCmd = positionNavGetActiveCommand();
+    const bool navAltitudeActive = positionNavHasActiveTarget() && navCmd->includeAltitude;
+
+    if (altHold.navAltitudeActive && !navAltitudeActive) {
+        // A waypoint callback can clear the command before this task sees completed.
+        // Capture the current altitude on completion or cancellation, including when
+        // a 3D command is replaced by horizontal navigation.
+        altHold.targetAltitudeCm = getAltitudeCmControl();
+        altHold.targetVelocity = 0.0f;
+    }
+    altHold.navAltitudeActive = navAltitudeActive;
+
     // check if the user has changed the target altitude using sticks
     if (altHoldConfig()->climbRate) {
         altHoldUpdateTargetAltitude();
@@ -150,18 +165,15 @@ static void altHoldUpdate(void)
     float targetAltCm = altHold.targetAltitudeCm;
     float targetVelForAlt = altHold.targetVelocity;
 
-    if (positionNavHasActiveTarget()) {
-        const positionNavCommand_t *navCmd = positionNavGetActiveCommand();
-        if (navCmd->includeAltitude) {
-            targetAltCm = navCmd->targetPosEfM.z * 100.0f;
-            if (positionNavTargetReached()) {
-                // Seed hold altitude at waypoint completion so Alt Hold does not revert
-                // to the pre-nav target altitude on the next cycle.
-                altHold.targetAltitudeCm = targetAltCm;
-                targetVelForAlt = 0.0f;
-            } else {
-                targetVelForAlt = positionNavGetTargetVelocityCmS().z;
-            }
+    if (navAltitudeActive) {
+        targetAltCm = navCmd->targetPosEfM.z * 100.0f;
+        if (positionNavTargetReached()) {
+            // Seed hold altitude at waypoint completion so Alt Hold does not revert
+            // to the pre-nav target altitude on the next cycle.
+            altHold.targetAltitudeCm = targetAltCm;
+            targetVelForAlt = 0.0f;
+        } else {
+            targetVelForAlt = positionNavGetTargetVelocityCmS().z;
         }
     }
 
