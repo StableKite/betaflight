@@ -25,12 +25,13 @@
 #include <stdbool.h>
 
 #include "pg/pg.h"
+#include "common/utils.h"
 
 #ifndef MAX_WAYPOINTS
 #define MAX_WAYPOINTS 30
 #endif
 
-_Static_assert(MAX_WAYPOINTS <= 255, "MAX_WAYPOINTS exceeds uint8_t waypointCount range");
+STATIC_ASSERT(MAX_WAYPOINTS <= 255, MAX_WAYPOINTS_exceeds_uint8_t_waypointCount_range);
 
 typedef enum {
     WAYPOINT_TYPE_FLYOVER = 0,

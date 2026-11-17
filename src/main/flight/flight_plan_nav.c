@@ -27,6 +27,8 @@
 // positionNav is multirotor-only; flight plan execution follows suit.
 #if ENABLE_FLIGHT_PLAN && !defined(USE_WING)
 
+#include <string.h>
+
 #include "common/maths.h"
 #include "common/time.h"
 #include "common/vector.h"
@@ -50,7 +52,7 @@
 static struct {
     flightPlanNavState_e state;
     uint8_t currentIndex;
-    timeUs_t holdStartUs;
+    timeMs_t holdStartMs;
     uint16_t holdDurationDs;
     bool active;
     float zBiasM;               // estimator Z at engage, so waypoint Z shares the estimator baseline
@@ -70,10 +72,26 @@ static struct {
 
 static flightPlanWaypointReachedFn reachedListener = NULL;
 
+static struct {
+    bool selected;
+    bool valid;
+    waypoint_t target;
+    uint16_t radiusCm;
+    uint16_t label;
+} external;
+
 static void onWaypointReached(void *userData);
+
+static uint8_t waypointCount(void)
+{
+    return external.selected ? (uint8_t)external.valid : flightPlanConfig()->waypointCount;
+}
 
 static const waypoint_t *currentWaypoint(void)
 {
+    if (external.selected) {
+        return external.valid && fp.currentIndex == 0 ? &external.target : NULL;
+    }
     const flightPlanConfig_t *plan = flightPlanConfig();
     if (fp.currentIndex >= plan->waypointCount) {
         return NULL;
@@ -102,7 +120,7 @@ static bool computeTargetEnuM(const waypoint_t *wp, vector3_t *out)
     // Waypoint altitude is AMSL (GPS frame); the estimator's Z is zeroed to
     // whichever source armed it first (baro or GPS). zBiasM is the estimator
     // reading at engage time, which aligns the target Z with the feedback Z.
-    out->z = (wp->altitude - origin.altCm) * 0.01f + fp.zBiasM;
+    out->z = ((int64_t)wp->altitude - origin.altCm) * 0.01f + fp.zBiasM;
     return true;
 }
 
@@ -172,7 +190,9 @@ static bool dispatchWaypoint(void)
 
     const autopilotConfig_t *cfg = autopilotConfig();
     const bool isHoldOrLand = (effective.type == WAYPOINT_TYPE_HOLD) || (effective.type == WAYPOINT_TYPE_LAND);
-    const float arrivalRadiusM = (isHoldOrLand ? cfg->waypointHoldRadius : cfg->waypointArrivalRadius) * 0.01f;
+    const uint16_t radiusCm = external.selected && external.radiusCm
+        ? external.radiusCm : (isHoldOrLand ? cfg->waypointHoldRadius : cfg->waypointArrivalRadius);
+    const float arrivalRadiusM = radiusCm * 0.01f;
 
     float cruiseMps = (effective.speed > 0) ? effective.speed * 0.01f : cfg->maxVelocity * 0.01f;
     if (cruiseMps < FP_MIN_CRUISE_MPS) {
@@ -220,7 +240,7 @@ static void advanceToNext(void)
     // staged cleanly for the upcoming leg.
     fp.altOverridePending = false;
 
-    if (fp.currentIndex + 1 >= flightPlanConfig()->waypointCount) {
+    if (fp.currentIndex + 1 >= waypointCount()) {
         fp.state = FP_NAV_COMPLETE;
         positionNavClearTarget();
         return;
@@ -246,13 +266,15 @@ static void onWaypointReached(void *userData)
         return;
     }
 
-    if (reachedListener) {
+    // The telemetry observer's uint8_t index belongs to the saved mission,
+    // not to an external command's independent uint16_t correlation label.
+    if (reachedListener && !external.selected) {
         reachedListener(fp.currentIndex);
     }
 
     if (wp->type == WAYPOINT_TYPE_HOLD && fp.holdDurationDs > 0) {
         fp.state = FP_NAV_HOLDING;
-        fp.holdStartUs = micros();
+        fp.holdStartMs = millis();
         return;
     }
 
@@ -274,6 +296,7 @@ static void clearModifierState(void)
 
 void flightPlanNavInit(void)
 {
+    memset(&external, 0, sizeof(external));
     fp.state = FP_NAV_IDLE;
     fp.currentIndex = 0;
     fp.active = false;
@@ -296,7 +319,7 @@ void flightPlanNavEngage(void)
     // never wants positionNav to auto-clear the target on reach.
     positionNavSetAutoClearOnReach(false);
 
-    if (flightPlanConfig()->waypointCount == 0) {
+    if (waypointCount() == 0) {
         fp.state = FP_NAV_COMPLETE;
         fp.active = true;
         positionNavClearTarget();
@@ -323,7 +346,14 @@ void flightPlanNavUpdate(timeUs_t currentTimeUs)
     }
 
     // Retry dispatch if we engaged before the estimator had an origin.
-    if (fp.state == FP_NAV_IDLE && flightPlanConfig()->waypointCount > 0) {
+    if (fp.state == FP_NAV_IDLE && waypointCount() > 0) {
+        dispatchWaypoint();
+        return;
+    }
+
+    // Position Hold resets its controller on engagement. Restore a target
+    // cleared by that native transition, without replaying completed targets.
+    if (fp.state == FP_NAV_TARGETING && !positionNavHasActiveTarget()) {
         dispatchWaypoint();
         return;
     }
@@ -338,9 +368,11 @@ void flightPlanNavUpdate(timeUs_t currentTimeUs)
     }
 
     if (fp.state == FP_NAV_HOLDING) {
-        const uint32_t holdUs = (uint32_t)fp.holdDurationDs * 100000u;
-        const uint32_t elapsedUs = (uint32_t)(currentTimeUs - fp.holdStartUs);
-        if (elapsedUs >= holdUs) {
+        // uint16_t deciseconds can exceed the microsecond timer's full range.
+        // Milliseconds preserve the entire PG domain, including timer wrap.
+        const uint32_t holdMs = (uint32_t)fp.holdDurationDs * 100u;
+        const uint32_t elapsedMs = (uint32_t)(millis() - fp.holdStartMs);
+        if (elapsedMs >= holdMs) {
             advanceToNext();
         }
     }
@@ -364,6 +396,58 @@ uint8_t flightPlanNavGetCurrentIndex(void)
 void flightPlanNavSetReachedListener(flightPlanWaypointReachedFn fn)
 {
     reachedListener = fn;
+}
+
+bool flightPlanNavSetExternalTarget(const waypoint_t *target, uint16_t radiusCm, uint16_t label)
+{
+    if (target && (target->latitude < -90 * GPS_DEGREES_DIVIDER || target->latitude > 90 * GPS_DEGREES_DIVIDER ||
+        target->longitude < -180 * GPS_DEGREES_DIVIDER || target->longitude > 180 * GPS_DEGREES_DIVIDER ||
+        target->type > WAYPOINT_TYPE_HOLD || target->pattern != WAYPOINT_PATTERN_ORBIT)) {
+        return false;
+    }
+    external.selected = true;
+    external.valid = target != NULL;
+    if (target) {
+        external.target = *target;
+    }
+    external.radiusCm = radiusCm;
+    external.label = label;
+    fp.currentIndex = 0;
+    clearModifierState();
+    if (fp.active) {
+        dispatchWaypoint();
+    }
+    return true;
+}
+
+bool flightPlanNavHasExternalOverride(void)
+{
+    return external.selected;
+}
+
+const waypoint_t *flightPlanNavGetExternalTarget(void)
+{
+    return external.selected && external.valid ? &external.target : NULL;
+}
+
+uint16_t flightPlanNavGetExternalLabel(void)
+{
+    return external.label;
+}
+
+uint16_t flightPlanNavGetExternalRadiusCm(void)
+{
+    return external.radiusCm;
+}
+
+uint32_t flightPlanNavGetHoldRemainingMs(void)
+{
+    if (fp.state != FP_NAV_HOLDING) {
+        return 0;
+    }
+    const uint32_t durationMs = (uint32_t)fp.holdDurationDs * 100u;
+    const uint32_t elapsedMs = (uint32_t)(millis() - fp.holdStartMs);
+    return elapsedMs < durationMs ? durationMs - elapsedMs : 0;
 }
 
 #endif // ENABLE_FLIGHT_PLAN && !USE_WING

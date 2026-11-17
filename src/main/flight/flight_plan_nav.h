@@ -25,6 +25,7 @@
 #include <stdint.h>
 
 #include "common/time.h"
+#include "pg/flight_plan.h"
 
 typedef enum {
     FP_NAV_IDLE = 0,
@@ -58,3 +59,14 @@ uint8_t flightPlanNavGetCurrentIndex(void);
 // to detach. Used by telemetry/mavlink_mission to emit MISSION_ITEM_REACHED.
 typedef void (*flightPlanWaypointReachedFn)(uint8_t index);
 void flightPlanNavSetReachedListener(flightPlanWaypointReachedFn fn);
+
+// A transient single-target command, independent of the saved mission PG.
+// It is staged while inactive and dispatched only by normal AUTOPILOT engage.
+// The current implementation accepts FLYOVER, FLYBY and stationary HOLD.
+// NULL cancels the external target without falling through to the saved plan.
+bool flightPlanNavSetExternalTarget(const waypoint_t *target, uint16_t radiusCm, uint16_t label);
+bool flightPlanNavHasExternalOverride(void);
+const waypoint_t *flightPlanNavGetExternalTarget(void);
+uint16_t flightPlanNavGetExternalLabel(void);
+uint16_t flightPlanNavGetExternalRadiusCm(void);
+uint32_t flightPlanNavGetHoldRemainingMs(void);

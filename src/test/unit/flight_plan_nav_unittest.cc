@@ -65,7 +65,8 @@ int g_clearTargetCalls;
 gpsLocation_t g_stubGpsOrigin;
 bool g_stubGpsOriginSet;
 
-timeUs_t g_stubMicros;
+uint64_t g_stubMicros;
+unsigned g_reachedCalls;
 
 } // namespace
 
@@ -95,6 +96,11 @@ void positionNavClearTarget(void)
 {
     g_clearTargetCalls++;
     g_lastTarget.valid = false;
+}
+
+bool positionNavHasActiveTarget(void)
+{
+    return g_lastTarget.valid;
 }
 
 void positionNavSetAutoClearOnReach(bool autoClear)
@@ -138,12 +144,12 @@ void GPS_distance2d(const gpsLocation_t *from, const gpsLocation_t *to, vector2_
 
 timeUs_t micros(void)
 {
-    return g_stubMicros;
+    return (timeUs_t)g_stubMicros;
 }
 
 uint32_t millis(void)
 {
-    return g_stubMicros / 1000;
+    return (uint32_t)(g_stubMicros / 1000);
 }
 
 } // extern "C"
@@ -155,6 +161,8 @@ protected:
         g_setTargetCalls = 0;
         g_clearTargetCalls = 0;
         g_stubMicros = 0;
+        g_reachedCalls = 0;
+        flightPlanNavSetReachedListener(nullptr);
 
         // Default GPS origin: equator, prime meridian, 100 m AMSL.
         g_stubGpsOrigin.lat = 0;
@@ -371,4 +379,136 @@ TEST_F(FlightPlanNavTest, EngageClampsBelowMinCruiseSpeed)
 
     flightPlanNavEngage();
     EXPECT_GE(g_lastTarget.cruiseSpeedMps, 1.0f - 0.01f);
+}
+
+TEST_F(FlightPlanNavTest, ExternalTargetStagesWithoutEngagingOrMutatingSavedMission)
+{
+    addWaypoint(10, 20, 15000, WAYPOINT_TYPE_FLYOVER);
+    const flightPlanConfig_t saved = *flightPlanConfig();
+    const waypoint_t target = { 200, 100, 12000, 0, 0, WAYPOINT_TYPE_FLYOVER, 0 };
+    ASSERT_TRUE(flightPlanNavSetExternalTarget(&target, 123, 65535));
+    EXPECT_TRUE(flightPlanNavHasExternalOverride());
+    ASSERT_NE(flightPlanNavGetExternalTarget(), nullptr);
+    EXPECT_EQ(flightPlanNavGetExternalLabel(), 65535);
+    EXPECT_EQ(flightPlanNavGetExternalRadiusCm(), 123);
+    EXPECT_FALSE(flightPlanNavIsActive());
+    EXPECT_EQ(g_setTargetCalls, 0);
+    EXPECT_EQ(memcmp(&saved, flightPlanConfig(), sizeof(saved)), 0);
+    flightPlanNavEngage();
+    EXPECT_EQ(flightPlanNavGetState(), FP_NAV_TARGETING);
+    EXPECT_EQ(g_setTargetCalls, 1);
+    EXPECT_NEAR(g_lastTarget.acceptanceRadiusM, 1.23f, 1e-5f);
+    EXPECT_NEAR(g_lastTarget.targetEfM.z, 20.0f, 1e-5f);
+    EXPECT_EQ(memcmp(&saved, flightPlanConfig(), sizeof(saved)), 0);
+}
+
+TEST_F(FlightPlanNavTest, InvalidExternalTargetLeavesNativeCommandUntouched)
+{
+    const waypoint_t target = { 200, 100, 12000, 0, 0, WAYPOINT_TYPE_FLYOVER, 0 };
+    ASSERT_TRUE(flightPlanNavSetExternalTarget(&target, 123, 65535));
+    for (unsigned type = WAYPOINT_TYPE_LAND; type < WAYPOINT_TYPE_COUNT; ++type) {
+        waypoint_t invalid = target;
+        invalid.type = (uint8_t)type;
+        EXPECT_FALSE(flightPlanNavSetExternalTarget(&invalid, 456, 4));
+        ASSERT_NE(flightPlanNavGetExternalTarget(), nullptr);
+        EXPECT_EQ(flightPlanNavGetExternalTarget()->latitude, target.latitude);
+        EXPECT_EQ(flightPlanNavGetExternalTarget()->longitude, target.longitude);
+        EXPECT_EQ(flightPlanNavGetExternalTarget()->altitude, target.altitude);
+        EXPECT_EQ(flightPlanNavGetExternalTarget()->speed, target.speed);
+        EXPECT_EQ(flightPlanNavGetExternalTarget()->duration, target.duration);
+        EXPECT_EQ(flightPlanNavGetExternalTarget()->type, target.type);
+        EXPECT_EQ(flightPlanNavGetExternalTarget()->pattern, target.pattern);
+        EXPECT_EQ(flightPlanNavGetExternalLabel(), 65535);
+        EXPECT_EQ(flightPlanNavGetExternalRadiusCm(), 123);
+    }
+    waypoint_t invalid = target;
+    invalid.latitude = 900000001;
+    EXPECT_FALSE(flightPlanNavSetExternalTarget(&invalid, 456, 4));
+    invalid = target;
+    invalid.longitude = -1800000001;
+    EXPECT_FALSE(flightPlanNavSetExternalTarget(&invalid, 456, 4));
+    EXPECT_EQ(g_setTargetCalls, 0);
+}
+
+TEST_F(FlightPlanNavTest, ExternalCancelDoesNotResumeSavedMission)
+{
+    addWaypoint(10, 20, 15000, WAYPOINT_TYPE_FLYOVER);
+    const waypoint_t target = { 200, 100, 12000, 0, 0, WAYPOINT_TYPE_FLYOVER, 0 };
+    ASSERT_TRUE(flightPlanNavSetExternalTarget(&target, 123, 5));
+    flightPlanNavEngage();
+    ASSERT_EQ(g_setTargetCalls, 1);
+    ASSERT_TRUE(flightPlanNavSetExternalTarget(nullptr, 0, 5));
+    EXPECT_EQ(flightPlanNavGetExternalTarget(), nullptr);
+    EXPECT_EQ(flightPlanNavGetState(), FP_NAV_COMPLETE);
+    EXPECT_FALSE(g_lastTarget.valid);
+    flightPlanNavDisengage();
+    flightPlanNavEngage();
+    flightPlanNavUpdate(g_stubMicros);
+    EXPECT_EQ(flightPlanNavGetState(), FP_NAV_COMPLETE);
+    EXPECT_EQ(g_setTargetCalls, 1);
+    EXPECT_EQ(flightPlanConfig()->waypointCount, 1);
+}
+
+TEST_F(FlightPlanNavTest, NativeControllerResetRestoresPendingTargetOnly)
+{
+    const waypoint_t target = { 200, 100, 12000, 0, 0, WAYPOINT_TYPE_FLYOVER, 0 };
+    ASSERT_TRUE(flightPlanNavSetExternalTarget(&target, 123, 5));
+    flightPlanNavEngage();
+    positionNavClearTarget();
+    flightPlanNavUpdate(g_stubMicros);
+    EXPECT_EQ(g_setTargetCalls, 2);
+    EXPECT_TRUE(g_lastTarget.valid);
+    triggerReached();
+    EXPECT_EQ(flightPlanNavGetState(), FP_NAV_COMPLETE);
+    flightPlanNavUpdate(g_stubMicros);
+    EXPECT_EQ(g_setTargetCalls, 2);
+}
+
+TEST_F(FlightPlanNavTest, FullDurationDomainDoesNotOverflowMicrosecondTimer)
+{
+    const waypoint_t target = { 200, 100, 12000, 0, 65535, WAYPOINT_TYPE_HOLD, 0 };
+    ASSERT_TRUE(flightPlanNavSetExternalTarget(&target, 123, 5));
+    flightPlanNavEngage();
+    triggerReached();
+    EXPECT_EQ(flightPlanNavGetHoldRemainingMs(), 6553500u);
+    g_stubMicros += 6553499000ull;
+    flightPlanNavUpdate(micros());
+    EXPECT_EQ(flightPlanNavGetState(), FP_NAV_HOLDING);
+    EXPECT_EQ(flightPlanNavGetHoldRemainingMs(), 1u);
+    g_stubMicros += 1000;
+    flightPlanNavUpdate(micros());
+    EXPECT_EQ(flightPlanNavGetState(), FP_NAV_COMPLETE);
+    EXPECT_EQ(flightPlanNavGetHoldRemainingMs(), 0u);
+}
+
+TEST_F(FlightPlanNavTest, HoldSurvivesMillisecondTimerWrap)
+{
+    g_stubMicros = (uint64_t)(UINT32_MAX - 999u) * 1000u;
+    const waypoint_t target = { 200, 100, 12000, 0, 20, WAYPOINT_TYPE_HOLD, 0 };
+    ASSERT_TRUE(flightPlanNavSetExternalTarget(&target, 123, 5));
+    flightPlanNavEngage();
+    triggerReached();
+    g_stubMicros += 1500000;
+    flightPlanNavUpdate(micros());
+    EXPECT_EQ(flightPlanNavGetState(), FP_NAV_HOLDING);
+    EXPECT_EQ(flightPlanNavGetHoldRemainingMs(), 500u);
+    g_stubMicros += 500000;
+    flightPlanNavUpdate(micros());
+    EXPECT_EQ(flightPlanNavGetState(), FP_NAV_COMPLETE);
+}
+
+TEST_F(FlightPlanNavTest, ExternalLabelDoesNotBecomeSavedMissionTelemetryIndex)
+{
+    flightPlanNavSetReachedListener([](uint8_t) { ++g_reachedCalls; });
+    const waypoint_t target = { 200, 100, 12000, 0, 0, WAYPOINT_TYPE_FLYOVER, 0 };
+    ASSERT_TRUE(flightPlanNavSetExternalTarget(&target, 123, 65535));
+    flightPlanNavEngage();
+    triggerReached();
+    EXPECT_EQ(g_reachedCalls, 0u);
+    flightPlanNavInit();
+    EXPECT_FALSE(flightPlanNavHasExternalOverride());
+    addWaypoint(10, 20, 15000, WAYPOINT_TYPE_FLYOVER);
+    flightPlanNavEngage();
+    triggerReached();
+    EXPECT_EQ(g_reachedCalls, 1u);
 }

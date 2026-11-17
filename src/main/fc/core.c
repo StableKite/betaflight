@@ -64,7 +64,7 @@
 #include "flight/alt_hold.h"
 #include "flight/pos_hold.h"
 
-#if ENABLE_FLIGHT_PLAN && !defined(USE_WING)
+#if ENABLE_FLIGHT_PLAN && !defined(USE_WING) && defined(USE_POSITION_HOLD) && defined(USE_ALTITUDE_HOLD)
 #include "flight/flight_plan_nav.h"
 #endif
 
@@ -1024,6 +1024,13 @@ void processRxModes(timeUs_t currentTimeUs)
         processRcAdjustments(currentControlRateProfile);
     }
 
+#if ENABLE_FLIGHT_PLAN && !defined(USE_WING) && defined(USE_POSITION_HOLD) && defined(USE_ALTITUDE_HOLD)
+    // A mission uses the same native position/altitude controllers as Hold.
+    // Receiver loss remains owned by the standard failsafe state machine.
+    const bool autopilotRequested = IS_RC_MODE_ACTIVE(BOXAUTOPILOT)
+        && sensors(SENSOR_GPS) && STATE(GPS_FIX) && !failsafeIsActive();
+#endif
+
     bool canUseHorizonMode = true;
     if ((IS_RC_MODE_ACTIVE(BOXANGLE)
         || failsafeIsActive()
@@ -1050,7 +1057,11 @@ void processRxModes(timeUs_t currentTimeUs)
         // and not in GPS_RESCUE_MODE, to give it priority over Altitude Hold
         && !FLIGHT_MODE(GPS_RESCUE_MODE)
         // and either the alt_hold switch is activated, or are in failsafe landing mode
-        && (IS_RC_MODE_ACTIVE(BOXALTHOLD) || failsafeIsActive())
+        && (IS_RC_MODE_ACTIVE(BOXALTHOLD) || failsafeIsActive()
+#if ENABLE_FLIGHT_PLAN && !defined(USE_WING) && defined(USE_POSITION_HOLD) && defined(USE_ALTITUDE_HOLD)
+            || autopilotRequested
+#endif
+        )
         // and we have Acc for self-levelling
         && sensors(SENSOR_ACC)
         // and we have altitude data
@@ -1071,7 +1082,11 @@ void processRxModes(timeUs_t currentTimeUs)
         // and not in GPS_RESCUE_MODE, to give it priority over Position Hold
         && !FLIGHT_MODE(GPS_RESCUE_MODE)
         // and either the alt_hold switch is activated, or are in failsafe landing mode
-        && (IS_RC_MODE_ACTIVE(BOXPOSHOLD) || failsafeIsActive())
+        && (IS_RC_MODE_ACTIVE(BOXPOSHOLD) || failsafeIsActive()
+#if ENABLE_FLIGHT_PLAN && !defined(USE_WING) && defined(USE_POSITION_HOLD) && defined(USE_ALTITUDE_HOLD)
+            || autopilotRequested
+#endif
+        )
         // and we have Acc for self-levelling
         && sensors(SENSOR_ACC)
         // but not until throttle is raised
@@ -1084,10 +1099,12 @@ void processRxModes(timeUs_t currentTimeUs)
     }
 #endif
 
-#if ENABLE_FLIGHT_PLAN && !defined(USE_WING)
+#if ENABLE_FLIGHT_PLAN && !defined(USE_WING) && defined(USE_POSITION_HOLD) && defined(USE_ALTITUDE_HOLD)
     if (ARMING_FLAG(ARMED)
         && !FLIGHT_MODE(GPS_RESCUE_MODE)
-        && IS_RC_MODE_ACTIVE(BOXAUTOPILOT)
+        && autopilotRequested
+        && FLIGHT_MODE(ALT_HOLD_MODE) && FLIGHT_MODE(POS_HOLD_MODE)
+        && !posHoldFailure()
         && sensors(SENSOR_ACC)
         && sensors(SENSOR_GPS) && STATE(GPS_FIX)
         && wasThrottleRaised()) {
