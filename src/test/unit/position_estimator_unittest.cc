@@ -63,10 +63,9 @@ bool gpsHasNewData(uint16_t *gpsStamp)
 
 void GPS_distance2d(const gpsLocation_t *from, const gpsLocation_t *to, vector2_t *dest)
 {
-    UNUSED(from);
-    UNUSED(to);
-    dest->x = 0.0f;
-    dest->y = 0.0f;
+    // Same from -> to ENU convention as io/gps.c, near the equator.
+    dest->x = ((int64_t)to->lon - from->lon) * 1.113195f;
+    dest->y = ((int64_t)to->lat - from->lat) * 1.113195f;
 }
 }
 
@@ -86,6 +85,7 @@ protected:
         memset(&rMat, 0, sizeof(rMat));
         memset(&gpsSol, 0, sizeof(gpsSol));
         memset(debug, 0, sizeof(debug));
+        flightModeFlags = 0;
 
         // Identity rotation and 1G reciprocal scale so zero accel stays zero.
         rMat.m[0][0] = 1.0f;
@@ -110,6 +110,25 @@ protected:
         positionConfigMutable()->rangefinder_max_range_cm = 400;
 
         positionEstimatorInit();
+    }
+
+    void expectGpsDisplacement(int32_t latitudeDelta, int32_t longitudeDelta)
+    {
+        stepEstimator(10);
+        gpsLocation_t origin;
+        ASSERT_TRUE(positionEstimatorGetGpsOrigin(&origin));
+        ASSERT_EQ(origin.lat, 0);
+        ASSERT_EQ(origin.lon, 0);
+        gpsSol.llh.lat = latitudeDelta;
+        gpsSol.llh.lon = longitudeDelta;
+        stepEstimator(100);
+        const positionEstimate3d_t *estimate = positionEstimatorGetEstimate();
+        EXPECT_TRUE(estimate->isValidXY);
+        EXPECT_NEAR(estimate->position.x, longitudeDelta * 1.113195f, 20.0f);
+        EXPECT_NEAR(estimate->position.y, latitudeDelta * 1.113195f, 20.0f);
+        ASSERT_TRUE(positionEstimatorGetGpsOrigin(&origin));
+        EXPECT_EQ(origin.lat, 0);
+        EXPECT_EQ(origin.lon, 0);
     }
 };
 
@@ -136,5 +155,25 @@ TEST_F(PositionEstimatorTest, RangefinderPreferFallsBackAndRecovers)
     // In RANGEFINDER_PREFER, recovered altitude should be pulled down toward RF value.
     EXPECT_LT(recoveredAltitude, fallbackAltitude - 5.0f);
     EXPECT_TRUE(positionEstimatorIsValidZ());
+}
+
+TEST_F(PositionEstimatorTest, GpsEastIsPositiveInEnu)
+{
+    expectGpsDisplacement(0, 100);
+}
+
+TEST_F(PositionEstimatorTest, GpsWestIsNegativeInEnu)
+{
+    expectGpsDisplacement(0, -100);
+}
+
+TEST_F(PositionEstimatorTest, GpsNorthIsPositiveInEnu)
+{
+    expectGpsDisplacement(100, 0);
+}
+
+TEST_F(PositionEstimatorTest, GpsSouthIsNegativeInEnu)
+{
+    expectGpsDisplacement(-100, 0);
 }
 

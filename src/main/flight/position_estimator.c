@@ -366,7 +366,7 @@ static void feedGPSMeasurements(timeUs_t nowUs)
     // XY position + velocity measurements
     if (xyEnabled && gpsXYAllowed && gpsArmLocationSet) {
         vector2_t gpsDistCm;
-        GPS_distance2d(&gpsSol.llh, &armLocationGps, &gpsDistCm);
+        GPS_distance2d(&armLocationGps, &gpsSol.llh, &gpsDistCm);
         // gpsDistCm: X = East-West (lon), Y = North-South (lat) relative to arm position
 
         const uint16_t xyDop = gpsDopOrFallback(gpsSol.dop.hdop, gpsSol.dop.pdop);
