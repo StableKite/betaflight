@@ -30,7 +30,7 @@ static bool finiteFloat(float value)
 static void virtualOpticalflowInit(opticalflowDev_t *dev)
 {
     UNUSED(dev);
-    sample = (opticalflowData_t){ .quality = OPTICALFLOW_NO_NEW_DATA };
+    sample = (opticalflowData_t){ .timeStampUs = micros(), .quality = OPTICALFLOW_NO_NEW_DATA };
 }
 
 static void virtualOpticalflowUpdate(opticalflowDev_t *dev)
