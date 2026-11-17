@@ -2900,15 +2900,35 @@ static void GPS_calculateDistanceFlown(bool initialize)
     lastLLH = gpsSol.llh;
 }
 
+static void GPS_calculateDistanceAndDirectionToHome(void);
+
+bool GPS_set_home_position(const gpsLocation_t *location)
+{
+    if (!location || location->lat < -90 * GPS_DEGREES_DIVIDER || location->lat > 90 * GPS_DEGREES_DIVIDER ||
+        location->lon < -180 * GPS_DEGREES_DIVIDER || location->lon > 180 * GPS_DEGREES_DIVIDER) {
+        return false;
+    }
+
+    GPS_home_llh = *location;
+    GPS_calc_longitude_scaling(location->lat);
+    ENABLE_STATE(GPS_FIX_HOME);
+    GPS_calculateDistanceAndDirectionToHome();
+    return true;
+}
+
+void GPS_clear_home_position(void)
+{
+    DISABLE_STATE(GPS_FIX_HOME);
+    GPS_calculateDistanceAndDirectionToHome();
+}
+
 void GPS_reset_home_position(void)
 // runs, if GPS is defined, on arming via tryArm() in core.c, and on gyro cal via processRcStickPositions() in rc_controls.c
 {
     if (!STATE(GPS_FIX_HOME) || !gpsConfig()->gps_set_home_point_once) {
         if (STATE(GPS_FIX) && gpsSol.numSat >= gpsRescueConfig()->minSats) {
             // those checks are always true for tryArm, but may not be true for gyro cal
-            GPS_home_llh = gpsSol.llh;
-            GPS_calc_longitude_scaling(gpsSol.llh.lat);
-            ENABLE_STATE(GPS_FIX_HOME);
+            GPS_set_home_position(&gpsSol.llh);
             // no point beeping success here since:
             // when triggered by tryArm, the arming beep is modified to indicate the GPS home fix status on arming, and
             // when triggered by gyro cal, the gyro cal beep takes priority over the GPS beep, so we won't hear the GPS beep
@@ -2931,10 +2951,16 @@ void GPS_reset_home_position(void)
 // Get bearing from pos1 to pos2, returns values with 0.01 degree precision
 void GPS_distance_cm_bearing(const gpsLocation_t *from, const gpsLocation_t* to, bool dist3d, uint32_t *pDist, int32_t *pBearing)
 {
-    // TO DO : handle crossing the 180 degree meridian, as in `GPS_distance2d()`
-    float dLat = (to->lat - from->lat) * EARTH_ANGLE_TO_CM;
-    float dLon = (to->lon - from->lon) * GPS_cosLat * EARTH_ANGLE_TO_CM; // convert to local angle
-    float dAlt = dist3d ? to->altCm - from->altCm : 0;
+    int64_t deltaLon = (int64_t)to->lon - from->lon;
+    const int64_t deg180 = 180 * GPS_DEGREES_DIVIDER;
+    if (deltaLon > deg180) {
+        deltaLon -= 2 * deg180;
+    } else if (deltaLon <= -deg180) {
+        deltaLon += 2 * deg180;
+    }
+    float dLat = ((int64_t)to->lat - from->lat) * EARTH_ANGLE_TO_CM;
+    float dLon = deltaLon * GPS_cosLat * EARTH_ANGLE_TO_CM; // convert to local angle
+    float dAlt = dist3d ? (int64_t)to->altCm - from->altCm : 0;
 
     if (pDist)
         *pDist = sqrtf(sq(dLat) + sq(dLon) + sq(dAlt));
